@@ -34,10 +34,19 @@ function renderMyRooms() {
   const rooms = store.rooms;
   $('#myRooms').innerHTML = rooms.length
     ? `<label class="fl">Your recent rooms</label>` + rooms.map(r =>
-        `<button class="room-item" data-goto="${esc(r)}"><span>💬 ${esc(r)}</span><span class="code">join →</span></button>`).join('')
+        `<div class="room-item" data-goto="${esc(r)}">
+           <button class="room-main" data-goto="${esc(r)}"><span>💬 ${esc(r)}</span><span class="code">join →</span></button>
+           <button class="room-x" data-remove="${esc(r)}" title="Remove from list">✕</button>
+         </div>`).join('')
     : '';
 }
 $('#myRooms').addEventListener('click', e => {
+  const rm = e.target.closest('[data-remove]');
+  if (rm) {
+    e.stopPropagation();
+    removeRoom(rm.dataset.remove);
+    return;
+  }
   const it = e.target.closest('[data-goto]');
   if (it) { $('#gateRoom').value = it.dataset.goto; tryJoin(); }
 });
@@ -50,13 +59,30 @@ function addRoom(code) {
   renderMyRooms();
 }
 
+/* remove a room from the local "recent rooms" list + its owner token */
+function removeRoom(code) {
+  store.rooms = store.rooms.filter(r => r !== code);
+  store.clearOwnerToken(code);
+  renderMyRooms();
+  renderRoomList();
+}
+
 function renderRoomList() {
   $('#roomList').innerHTML = store.rooms.map(r =>
-    `<button class="room-item ${r === currentRoom ? 'active' : ''}" data-goto="${esc(r)}">
-       <span>💬 ${esc(r)}</span><span class="code">${r === currentRoom ? '● here' : 'open'}</span></button>`).join('');
+    `<div class="room-item ${r === currentRoom ? 'active' : ''}">
+       <button class="room-main" data-goto="${esc(r)}"><span>💬 ${esc(r)}</span><span class="code">${r === currentRoom ? '● here' : 'open'}</span></button>
+       <button class="room-x" data-remove="${esc(r)}" title="Remove from list">✕</button>
+     </div>`).join('');
   $('#roomPublic').classList.toggle('active', currentRoom === 'public');
 }
 $('#roomList').addEventListener('click', e => {
+  const rm = e.target.closest('[data-remove]');
+  if (rm) {
+    e.stopPropagation();
+    removeRoom(rm.dataset.remove);
+    if (rm.dataset.remove === currentRoom) location.href = '/private';
+    return;
+  }
   const it = e.target.closest('[data-goto]');
   if (it && it.dataset.goto !== currentRoom) joinRoom(it.dataset.goto);
 });
@@ -230,7 +256,8 @@ $('#btnDeleteRoom').addEventListener('click', async () => {
     const d = await r.json();
     if (!r.ok) return toast('⚠ ' + (d.error || 'delete failed'), 'err');
     toast('🗑 Room deleted');
-    store.clearOwnerToken(currentRoom);
+    removeRoom(currentRoom);
+    socket.emit('leave', {});
     location.href = '/private';
   } catch { toast('⚠ Delete failed', 'err'); }
 });

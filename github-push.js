@@ -1,12 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const TOKEN = process.env.GH_TOKEN, REPO = process.env.GH_REPO, OWNER = process.env.GH_OWNER, ROOT = __dirname;
-const api = async (url, opts = {}) => {
-  const res = await fetch('https://api.github.com' + url, { ...opts, headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) } });
-  const text = await res.text(); let data = null; try { data = JSON.parse(text); } catch {}
-  if (!res.ok) throw new Error(`${res.status} ${url} :: ${text.slice(0,300)}`);
-  return data;
-};
+const api = async (url, opts = {}) => { const res = await fetch('https://api.github.com' + url, { ...opts, headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) } }); const text = await res.text(); let data = null; try { data = JSON.parse(text); } catch {} if (!res.ok) throw new Error(`${res.status} ${url} :: ${text.slice(0,300)}`); return data; };
 const IGNORE = ['node_modules', '.npm-cache', '.edge-profile', 'data', 'uploads', '.git'];
 const isIgnored = p => IGNORE.some(i => p === i || p.startsWith(i + '/') || p.startsWith(i + '\\')) || p.endsWith('.png');
 function collect(dir, base = '') { const out = []; for (const name of fs.readdirSync(dir)) { const full = path.join(dir, name); const rel = base ? `${base}/${name}` : name; if (isIgnored(rel)) continue; const st = fs.statSync(full); if (st.isDirectory()) out.push(...collect(full, rel)); else out.push({ path: rel.replace(/\\/g, '/'), full }); } return out; }
@@ -18,7 +13,7 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const parentSha = head.object.sha;
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: parentSha, tree }) });
-  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: 'Fix stale browser cache: no-cache static assets + cache-busting version query', tree: treeRes.sha, parents: [parentSha] }) });
+  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: 'Fix: remove room from local list on delete + manual remove button for stale rooms', tree: treeRes.sha, parents: [parentSha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed');
   process.exit(0);
