@@ -164,7 +164,11 @@ app.use(compression());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use('/static', express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
+app.use('/static', express.static(path.join(__dirname, 'public'), {
+  maxAge: 0,
+  etag: false,
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'),
+}));
 
 // visit logging for everything
 app.use((req, res, next) => {
