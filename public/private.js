@@ -1,4 +1,4 @@
-/* ============================== SEND · private chat ============================== */
+/* ============================== SEND · chat ============================== */
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtTime = ts => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -14,6 +14,7 @@ function toast(msg, kind = 'ok') {
 const store = {
   get name() { return localStorage.getItem('send_name') || ''; },
   set name(v) { localStorage.setItem('send_name', v); },
+  get uid() { let u = localStorage.getItem('send_uid'); if (!u) { u = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('send_uid', u); } return u; },
   get rooms() { try { return JSON.parse(localStorage.getItem('send_rooms') || '[]'); } catch { return []; } },
   set rooms(v) { localStorage.setItem('send_rooms', JSON.stringify(v)); },
   ownerToken(code) { return localStorage.getItem('send_owner_' + code) || null; },
@@ -42,6 +43,7 @@ $('#myRooms').addEventListener('click', e => {
 });
 
 function addRoom(code) {
+  if (code === 'public') return;
   const rooms = store.rooms.filter(r => r !== code);
   rooms.unshift(code);
   store.rooms = rooms.slice(0, 12);
@@ -51,13 +53,14 @@ function addRoom(code) {
 function renderRoomList() {
   $('#roomList').innerHTML = store.rooms.map(r =>
     `<button class="room-item ${r === currentRoom ? 'active' : ''}" data-goto="${esc(r)}">
-       <span>💬 ${esc(r)}</span><span class="code">${r === currentRoom ? '● here' : 'open'}</span></button>`).join('')
-    || '<div class="small muted">No rooms yet.</div>';
+       <span>💬 ${esc(r)}</span><span class="code">${r === currentRoom ? '● here' : 'open'}</span></button>`).join('');
+  $('#roomPublic').classList.toggle('active', currentRoom === 'public');
 }
 $('#roomList').addEventListener('click', e => {
   const it = e.target.closest('[data-goto]');
   if (it && it.dataset.goto !== currentRoom) joinRoom(it.dataset.goto);
 });
+$('#roomPublic').addEventListener('click', () => { if (currentRoom !== 'public') joinRoom('public'); });
 
 function genCode() {
   const a = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -80,6 +83,7 @@ $('#btnCreate').addEventListener('click', async () => {
 });
 $('#btnJoin').addEventListener('click', tryJoin);
 $('#gateRoom').addEventListener('keydown', e => { if (e.key === 'Enter') tryJoin(); });
+$('#btnPublic').addEventListener('click', () => { store.name = $('#gateName').value.trim() || 'anonymous'; startChat('public'); });
 
 function tryJoin() {
   const code = $('#gateRoom').value.trim().toLowerCase();
@@ -101,18 +105,29 @@ function joinRoom(code) {
   const name = store.name || 'anonymous';
   store.name = name;
   currentRoom = code;
-  iAmOwner = !!store.ownerToken(code);
+  iAmAdmin = false;
+  iAmOwner = code === 'public' ? false : !!store.ownerToken(code);
   $('#roomTitle').textContent = code;
+  $('#roomIcon').textContent = code === 'public' ? '🌍' : '💬';
+  $('#adminBadge').classList.add('hidden');
+  $('#btnDeleteRoom').style.display = 'none';
   $('#messages').innerHTML = '';
   $('#msgInput').value = '';
   $('#typingInd').textContent = '';
-  const pw = $('#gateAdminPw').value;
-  socket.emit('join', { room: code, name, pw }, (ack) => {
+  socket.emit('join', { room: code, name, uid: store.uid }, (ack) => {
     addRoom(code);
     renderRoomList();
-    if (ack && ack.admin) toast('🛡️ Private admin mode');
+    if (ack && ack.admin) { iAmAdmin = true; $('#adminBadge').classList.remove('hidden'); }
+    refreshDeleteRoomBtn();
   });
   $('#msgInput').focus();
+}
+
+function refreshDeleteRoomBtn() {
+  const canDelete = iAmAdmin || iAmOwner;
+  $('#btnDeleteRoom').style.display = canDelete ? '' : 'none';
+  // only private admin can delete the public chat
+  if (currentRoom === 'public' && !iAmAdmin) $('#btnDeleteRoom').style.display = 'none';
 }
 
 /* ------------------------------- send / img ------------------------------- */
@@ -146,15 +161,18 @@ $('#msgInput').addEventListener('paste', e => {
 async function sendImage(file) {
   if (!file.type.startsWith('image/')) return toast('⚠ Only image files', 'err');
   if (file.size > 25 * 1024 * 1024) return toast('⚠ Image too large (max 25 MB)', 'err');
+  const btn = $('#btnImage');
+  btn.disabled = true;
   toast('📎 Uploading image…');
   const fd = new FormData();
   fd.append('image', file);
   try {
     const r = await fetch('/api/chat/upload', { method: 'POST', body: fd });
     const d = await r.json();
-    if (!r.ok) return toast('⚠ Upload failed: ' + (d.error || ''), 'err');
+    if (!r.ok) return toast('⚠ Upload failed: ' + (d.error || 'rejected'), 'err');
     socket.emit('msg', { text: '', image: d.url });
   } catch { toast('⚠ Upload failed', 'err'); }
+  finally { btn.disabled = false; }
 }
 
 /* ------------------------------ msg rendering ----------------------------- */
@@ -186,7 +204,7 @@ function appendSys(m) {
   $('#messages').scrollTop = $('#messages').scrollHeight;
 }
 
-/* delete a message (own, or any if private admin) */
+/* delete a message (own always; any if admin) */
 $('#messages').addEventListener('click', e => {
   const b = e.target.closest('[data-del]');
   if (!b) return;
@@ -200,15 +218,12 @@ socket.on('delmsg', ({ id }) => {
 });
 
 /* ------------------------------ delete room ------------------------------- */
-function refreshDeleteBtn() {
-  $('#btnDeleteRoom').classList.toggle('hidden', !(iAmAdmin || iAmOwner));
-}
 $('#btnDeleteRoom').addEventListener('click', async () => {
   if (!currentRoom) return;
-  const by = iAmAdmin ? 'admin' : 'creator';
-  if (!confirm(`Delete room #${currentRoom} and all its messages? (as ${by})`)) return;
+  if (!iAmAdmin && !iAmOwner) return;
+  if (!confirm(`Delete room #${currentRoom} and all its messages?`)) return;
   const url = iAmAdmin
-    ? `/api/chat/rooms/${encodeURIComponent(currentRoom)}?pw=${encodeURIComponent($('#gateAdminPw').value)}`
+    ? `/api/chat/rooms/${encodeURIComponent(currentRoom)}?pw=${encodeURIComponent(PRIVATE_ADMIN_PW || '')}`
     : `/api/chat/rooms/${encodeURIComponent(currentRoom)}/mine?token=${encodeURIComponent(store.ownerToken(currentRoom) || '')}`;
   try {
     const r = await fetch(url, { method: 'DELETE' });
@@ -216,38 +231,12 @@ $('#btnDeleteRoom').addEventListener('click', async () => {
     if (!r.ok) return toast('⚠ ' + (d.error || 'delete failed'), 'err');
     toast('🗑 Room deleted');
     store.clearOwnerToken(currentRoom);
-    socket.emit('leave', {});
     location.href = '/private';
   } catch { toast('⚠ Delete failed', 'err'); }
 });
 
-/* ---------------------------- private admin ------------------------------- */
-$('#btnAdminBrowse').addEventListener('click', async () => {
-  const pw = $('#gateAdminPw').value.trim();
-  if (!pw) return toast('⚠ Enter the private admin password', 'err');
-  try {
-    const r = await fetch('/api/chat/rooms?pw=' + encodeURIComponent(pw));
-    const d = await r.json();
-    if (!r.ok) return toast('⚠ ' + (d.error || 'wrong password'), 'err');
-    iAmAdmin = true;
-    $('#adminBadge').classList.remove('hidden');
-    $('#adminRooms').innerHTML = d.length
-      ? `<label class="fl">All rooms (${d.length})</label>` + d.map(x =>
-          `<button class="room-item" data-admin-room="${esc(x.name)}">
-             <span>💬 ${esc(x.name)}</span><span class="code">${x.count} msgs · open →</span></button>`).join('')
-      : '<div class="small muted">No rooms exist yet.</div>';
-  } catch { toast('⚠ Failed to list rooms', 'err'); }
-});
-$('#adminRooms').addEventListener('click', e => {
-  const it = e.target.closest('[data-admin-room]');
-  if (it) { $('#gateRoom').value = it.dataset.adminRoom; tryJoin(); }
-});
-
-socket.on('role', ({ admin, owner }) => {
-  // owner status comes only from local storage, ignore server owner flag
-  if (admin) { iAmAdmin = true; $('#adminBadge').classList.remove('hidden'); }
-  refreshDeleteBtn();
-});
+/* ---------------------------- private admin (hidden) ---------------------- */
+let PRIVATE_ADMIN_PW = sessionStorage.getItem('send_privateadmin_pw') || '';
 
 $('#btnShare').addEventListener('click', async () => {
   const url = location.origin + '/private#' + currentRoom;
@@ -267,8 +256,8 @@ $('#btnNewRoom').addEventListener('click', async () => {
 });
 
 socket.on('connect', () => { /* join handled on demand */ });
-socket.on('history', list => (list || []).forEach(m => appendMsg(m, m.name === store.name)));
-socket.on('msg', m => appendMsg(m, m.name === store.name));
+socket.on('history', list => (list || []).forEach(m => appendMsg(m, m.uid === store.uid)));
+socket.on('msg', m => appendMsg(m, m.uid === store.uid));
 socket.on('system', m => {
   appendSys(m);
   if (m.kind === 'delete') setTimeout(() => location.href = '/private', 1600);

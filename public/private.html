@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#07080f">
-  <title>Send — Private Chat</title>
+  <title>Send — Chat</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -14,35 +14,30 @@
       <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
       <div class="nav-links">
         <a href="/">← Home</a>
-        <a href="/private" class="active">Private</a>
+        <a href="/private" class="active">Chat</a>
       </div>
     </div>
   </nav>
 
   <!-- gate -->
   <div class="card gate" id="gate">
-    <h2>💬 Private chat</h2>
-    <div class="sub">Create a room or join one with a code. Rooms aren't listed anywhere — only people with the code can enter.</div>
+    <h2>💬 Chat</h2>
+    <div class="sub">Join the public chat, or create a private room and share its code.</div>
 
     <div class="field">
       <label class="fl">Your name</label>
       <input type="text" id="gateName" placeholder="e.g. Alex" maxlength="30">
     </div>
-    <button class="btn primary" id="btnCreate" style="width:100%">✨ Create a new room</button>
-    <div class="or-divider">or join an existing room</div>
-    <div class="row">
+
+    <button class="btn primary" id="btnPublic" style="width:100%;font-size:1rem">🌍 Join the public chat</button>
+
+    <div class="or-divider">or create / join a private room</div>
+    <button class="btn" id="btnCreate" style="width:100%">✨ Create a new private room</button>
+    <div class="row mt">
       <input type="text" id="gateRoom" placeholder="room code" maxlength="40" style="text-transform:lowercase" autocomplete="off">
       <button class="btn" id="btnJoin">Join</button>
     </div>
     <div id="myRooms" style="margin-top:20px"></div>
-
-    <div class="or-divider">private admin</div>
-    <div class="field">
-      <label class="fl">Admin password (browse &amp; moderate all rooms)</label>
-      <input type="password" id="gateAdminPw" placeholder="private admin password" autocomplete="off">
-    </div>
-    <button class="btn" id="btnAdminBrowse" style="width:100%">🛡️ Browse all rooms as admin</button>
-    <div id="adminRooms" style="margin-top:16px"></div>
   </div>
 
   <!-- chat -->
@@ -50,17 +45,20 @@
     <div class="chat-app">
       <div class="card panel">
         <div class="ph">Rooms</div>
-        <div class="room-list" id="roomList"></div>
-        <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ New room</button>
+        <button class="room-item" id="roomPublic" data-goto="public">
+          <span>🌍 Public chat</span><span class="code">everyone</span>
+        </button>
+        <div class="room-list" id="roomList" style="margin-top:8px"></div>
+        <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ New private room</button>
       </div>
       <div class="card chat-main">
         <div class="chat-header">
-          <span style="font-size:1.25rem">💬</span>
+          <span style="font-size:1.25rem" id="roomIcon">💬</span>
           <span class="hash">#</span><span class="room-title" id="roomTitle">—</span>
           <span id="adminBadge" class="badge text hidden">private admin</span>
           <span class="right">
-            <button class="btn small danger hidden" id="btnDeleteRoom" title="Delete this room">🗑 Delete room</button>
-            <button class="btn small" id="btnShare">🔗 Share</button>
+            <button class="btn small danger" id="btnDeleteRoom" title="Delete this room">🗑 Delete room</button>
+            <button class="btn small" id="btnShare" title="Share room link">🔗 Share</button>
             <button class="btn small ghost" id="btnLeave">Leave</button>
           </span>
         </div>

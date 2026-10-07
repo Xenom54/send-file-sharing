@@ -437,11 +437,10 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
   position: absolute; top: -7px; right: -7px;
   width: 22px; height: 22px; border-radius: 50%;
   border: 1px solid var(--border-2); background: #141a28; color: var(--danger);
-  font-size: .68rem; cursor: pointer; opacity: 0;
-  transition: opacity .15s; display: grid; place-items: center; padding: 0;
+  font-size: .68rem; cursor: pointer; opacity: .9;
+  transition: opacity .15s, background .15s; display: grid; place-items: center; padding: 0;
 }
-.msg:hover .msg-del, .msg.mine:hover .msg-del { opacity: 1; }
-.msg-del:hover { background: rgba(251, 113, 133, .2); border-color: rgba(251, 113, 133, .6); }
+.msg-del:hover { opacity: 1; background: rgba(251, 113, 133, .25); border-color: rgba(251, 113, 133, .6); }
 .chat-img { max-width: 100%; max-height: 260px; border-radius: 9px; display: block; cursor: zoom-in; border: 1px solid var(--border); margin-bottom: 4px; }
 .msg .msg-text { word-break: break-word; }
 .msg.mine .msg-del { left: -7px; right: auto; }

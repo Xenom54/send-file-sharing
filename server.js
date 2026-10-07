@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 const ADMIN_PASSWORD_DEFAULT = 'admin123';
-const PRIVATE_ADMIN_PASSWORD = process.env.PRIVATE_ADMIN_PASSWORD || 'privateadmin';
+const PRIVATE_ADMIN_PASSWORD = process.env.PRIVATE_ADMIN_PASSWORD || 'kalios';
 const MAX_FILE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB
 
 [DATA_DIR, UPLOAD_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
@@ -177,6 +177,7 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/private', (req, res) => res.sendFile(path.join(__dirname, 'public', 'private.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/privateadmin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privateadmin.html')));
 
 // health check (for uptime monitors / deployment platforms)
 app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), items: items.length }));
@@ -366,7 +367,12 @@ function saveChat(room, msg) {
 const chatStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
-    const ext = (path.extname(file.originalname) || '.png').toLowerCase().replace(/[^a-z0-9.]/g, '');
+    let ext = (path.extname(file.originalname) || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+    // if no usable extension (e.g. pasted clipboard image), derive from mime type
+    if (!ext) {
+      const byMime = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp', 'image/bmp': '.bmp', 'image/avif': '.avif' };
+      ext = byMime[file.mimetype] || '.png';
+    }
     cb(null, `chat-${Date.now()}-${newId()}${ext}`);
   },
 });
@@ -379,7 +385,7 @@ const chatUpload = multer({
 app.post('/api/chat/upload', chatUpload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no image or type rejected' });
   log('chat_image', req.file.originalname, req);
-  res.json({ url: '/uploads/' + encodeURIComponent(req.file.fileName || req.file.filename) });
+  res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename) });
 });
 
 const server = http.createServer(app);
@@ -396,6 +402,17 @@ app.get('/api/chat/rooms', (req, res) => {
   const pw = String(req.query.pw || '');
   if (pw !== PRIVATE_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
   res.json(Object.keys(chats).map(name => ({ name, count: (chats[name] || []).length })));
+});
+
+/* private admin login check (for the hidden /privateadmin page) */
+app.post('/api/privateadmin/login', (req, res) => {
+  const pw = String(req.body?.pw || req.body?.password || '');
+  if (!pw || pw !== PRIVATE_ADMIN_PASSWORD) {
+    log('privateadmin_login', 'failed', req);
+    return res.status(401).json({ error: 'wrong password' });
+  }
+  log('privateadmin_login', 'success', req);
+  res.json({ ok: true });
 });
 
 /* create a room as its owner (returns a one-time owner token) */
@@ -441,13 +458,14 @@ app.delete('/api/chat/rooms/:room/mine', (req, res) => {
 io.on('connection', (socket) => {
   let room = null, name = 'anonymous', isPrivateAdmin = false;
 
-  socket.on('join', ({ room: r, name: n, pw }, ack) => {
+  socket.on('join', ({ room: r, name: n, pw, uid: u }, ack) => {
     room = roomName(r);
     name = String(n || 'anonymous').slice(0, 30);
+    const uid = String(u || '').slice(0, 64);
     isPrivateAdmin = String(pw || '') === PRIVATE_ADMIN_PASSWORD && !!PRIVATE_ADMIN_PASSWORD;
     if (!room) { socket.emit('system', { ts: Date.now(), text: 'invalid room' }); return; }
     socket.join(room);
-    socket.data.room = room; socket.data.name = name; socket.data.admin = isPrivateAdmin;
+    socket.data.room = room; socket.data.name = name; socket.data.uid = uid; socket.data.admin = isPrivateAdmin;
     socket.emit('history', chatHistory(room));
     socket.emit('role', { admin: isPrivateAdmin, owner: !!roomOwners[room] });
     io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
@@ -460,7 +478,7 @@ io.on('connection', (socket) => {
     const t = String(text || '').slice(0, 4000);
     const img = String(image || '').slice(0, 2000);
     if (!t.trim() && !img) return;
-    const msg = { ts: Date.now(), name, text: t, id: newId() };
+    const msg = { ts: Date.now(), name, text: t, id: newId(), uid: socket.data.uid };
     if (img) msg.image = img;
     if (isPrivateAdmin) msg.admin = true;
     saveChat(room, msg);
@@ -474,8 +492,8 @@ io.on('connection', (socket) => {
     const list = chats[room] || [];
     const i = list.findIndex(m => m.id === id);
     if (i === -1) return;
-    if (!isPrivateAdmin && list[i].name !== name) return;
-    const [removed] = list.splice(i, 1);
+    if (!isPrivateAdmin && list[i].uid !== socket.data.uid) return;
+    list.splice(i, 1);
     saveChats();
     io.to(room).emit('delmsg', { id });
     log('chat_msg_del', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });

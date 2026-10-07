@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07080f">
+  <title>Send — Private Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
+      <div class="nav-links">
+        <a href="/">← Home</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- login -->
+  <div class="card admin-login" id="loginCard">
+    <div class="lock-ic">🛡️</div>
+    <h2>Private admin</h2>
+    <div class="sub">Moderate every private chat room — read, delete messages and delete rooms.</div>
+    <div class="field">
+      <label class="fl">Password</label>
+      <input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn primary" id="btnLogin" style="width:100%">Log in →</button>
+  </div>
+
+  <!-- dashboard -->
+  <div class="wrap hidden" id="dash">
+    <div class="hero">
+      <div style="flex:1">
+        <h1>Private chat admin</h1>
+        <p>All rooms, message counts, and moderation tools.</p>
+      </div>
+      <button class="btn small" id="btnLogout">Log out</button>
+    </div>
+
+    <div class="toolbar">
+      <span class="small muted" id="roomCount"></span>
+      <span class="spacer"></span>
+      <button class="btn small" id="btnRefresh">↻ Refresh</button>
+    </div>
+    <div class="grid" id="roomsGrid"></div>
+  </div>
+
+  <!-- room viewer -->
+  <div class="wrap hidden" id="roomView">
+    <div class="hero" style="align-items:center">
+      <button class="btn small" id="btnBack">← Back</button>
+      <div style="flex:1;min-width:200px">
+        <h1 id="viewTitle">#room</h1>
+      </div>
+      <button class="btn small danger" id="btnDeleteRoom">🗑 Delete room</button>
+    </div>
+    <div class="card chat-main" style="height:70vh">
+      <div class="messages" id="viewMessages"></div>
+      <div class="chat-input">
+        <input type="text" id="viewInput" placeholder="Send as private admin…" maxlength="4000">
+        <button class="btn primary" id="viewSend">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/static/privateadmin.js"></script>
+</body>
+</html>
