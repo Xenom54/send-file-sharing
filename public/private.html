@@ -23,6 +23,7 @@
   <div class="card gate" id="gate">
     <h2>💬 Private chat</h2>
     <div class="sub">Create a room or join one with a code. Rooms aren't listed anywhere — only people with the code can enter.</div>
+
     <div class="field">
       <label class="fl">Your name</label>
       <input type="text" id="gateName" placeholder="e.g. Alex" maxlength="30">
@@ -34,6 +35,14 @@
       <button class="btn" id="btnJoin">Join</button>
     </div>
     <div id="myRooms" style="margin-top:20px"></div>
+
+    <div class="or-divider">private admin</div>
+    <div class="field">
+      <label class="fl">Admin password (browse &amp; moderate all rooms)</label>
+      <input type="password" id="gateAdminPw" placeholder="private admin password" autocomplete="off">
+    </div>
+    <button class="btn" id="btnAdminBrowse" style="width:100%">🛡️ Browse all rooms as admin</button>
+    <div id="adminRooms" style="margin-top:16px"></div>
   </div>
 
   <!-- chat -->
@@ -48,7 +57,9 @@
         <div class="chat-header">
           <span style="font-size:1.25rem">💬</span>
           <span class="hash">#</span><span class="room-title" id="roomTitle">—</span>
+          <span id="adminBadge" class="badge text hidden">private admin</span>
           <span class="right">
+            <button class="btn small danger hidden" id="btnDeleteRoom" title="Delete this room">🗑 Delete room</button>
             <button class="btn small" id="btnShare">🔗 Share</button>
             <button class="btn small ghost" id="btnLeave">Leave</button>
           </span>
@@ -56,8 +67,10 @@
         <div class="messages" id="messages"></div>
         <div class="typing-ind" id="typingInd"></div>
         <div class="chat-input">
+          <button class="btn icon" id="btnImage" title="Send an image">🖼️</button>
           <input type="text" id="msgInput" placeholder="Type a message…" autocomplete="off" maxlength="4000">
           <button class="btn primary" id="btnSend">Send</button>
+          <input type="file" id="imageInput" accept="image/*" hidden>
         </div>
       </div>
     </div>

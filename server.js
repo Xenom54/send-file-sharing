@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 const ADMIN_PASSWORD_DEFAULT = 'admin123';
+const PRIVATE_ADMIN_PASSWORD = process.env.PRIVATE_ADMIN_PASSWORD || 'privateadmin';
 const MAX_FILE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB
 
 [DATA_DIR, UPLOAD_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
@@ -21,6 +22,7 @@ const paths = {
   items: path.join(DATA_DIR, 'items.json'),
   logs: path.join(DATA_DIR, 'logs.json'),
   chats: path.join(DATA_DIR, 'chats.json'),
+  owners: path.join(DATA_DIR, 'owners.json'),
   admin: path.join(DATA_DIR, 'admin.json'),
   sessions: path.join(DATA_DIR, 'sessions.json'),
 };
@@ -40,11 +42,14 @@ function writeJSON(file, data) {
 const items = readJSON(paths.items, []);
 const logs = readJSON(paths.logs, []);
 const chats = readJSON(paths.chats, {});
+const roomOwners = readJSON(paths.owners, {});
 if (!Array.isArray(items)) items.length = 0;
+if (!roomOwners || typeof roomOwners !== 'object' || Array.isArray(roomOwners)) for (const k of Object.keys(roomOwners)) delete roomOwners[k];
 
 function saveItems() { writeJSON(paths.items, items); }
 function saveLogs() { writeJSON(paths.logs, logs); }
 function saveChats() { writeJSON(paths.chats, chats); }
+function saveOwners() { writeJSON(paths.owners, roomOwners); }
 
 function log(action, detail, req) {
   const ip = req
@@ -357,38 +362,123 @@ function saveChat(room, msg) {
   saveChats();
 }
 
+/* ---- chat image upload ---- */
+const chatStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = (path.extname(file.originalname) || '.png').toLowerCase().replace(/[^a-z0-9.]/g, '');
+    cb(null, `chat-${Date.now()}-${newId()}${ext}`);
+  },
+});
+const chatUpload = multer({
+  storage: chatStorage,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB per chat image
+  fileFilter: (req, file, cb) => cb(null, !!file.mimetype.startsWith('image/')),
+});
+
+app.post('/api/chat/upload', chatUpload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'no image or type rejected' });
+  log('chat_image', req.file.originalname, req);
+  res.json({ url: '/uploads/' + encodeURIComponent(req.file.fileName || req.file.filename) });
+});
+
 const server = http.createServer(app);
 // allow huge uploads without being cut off by default timeouts
 server.requestTimeout = 0;
 server.headersTimeout = 0;
 server.keepAliveTimeout = 0;
-const io = new Server(server, { maxHttpBufferSize: 5 * 1024 * 1024 });
+const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024 });
 
 function roomName(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40); }
 
-io.on('connection', (socket) => {
-  let room = null, name = 'anonymous';
+/* rooms a private admin may browse */
+app.get('/api/chat/rooms', (req, res) => {
+  const pw = String(req.query.pw || '');
+  if (pw !== PRIVATE_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
+  res.json(Object.keys(chats).map(name => ({ name, count: (chats[name] || []).length })));
+});
 
-  socket.on('join', ({ room: r, name: n }, ack) => {
+/* create a room as its owner (returns a one-time owner token) */
+app.post('/api/chat/rooms/:room', (req, res) => {
+  const room = roomName(req.params.room);
+  if (!room) return res.status(400).json({ error: 'invalid room name' });
+  if (roomOwners[room] || chats[room]) return res.status(409).json({ error: 'room already exists' });
+  const token = crypto.randomBytes(16).toString('hex');
+  roomOwners[room] = token;
+  chats[room] = [];
+  saveOwners(); saveChats();
+  log('chat_create', `room=${room}`, req);
+  res.json({ ok: true, ownerToken: token });
+});
+
+/* private admin deletes any room (and its history) */
+app.delete('/api/chat/rooms/:room', (req, res) => {
+  const pw = String(req.query.pw || req.body?.pw || '');
+  if (pw !== PRIVATE_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
+  const room = roomName(req.params.room);
+  if (!room) return res.status(400).json({ error: 'invalid room' });
+  delete chats[room];
+  saveChats();
+  io.to(room).emit('system', { ts: Date.now(), text: 'this room was deleted by an admin', kind: 'delete' });
+  log('chat_delete', `room=${room}`, req);
+  res.json({ ok: true });
+});
+
+/* creator of a room may delete it */
+app.delete('/api/chat/rooms/:room/mine', (req, res) => {
+  const room = roomName(req.params.room);
+  const token = String(req.query.token || '');
+  if (!room) return res.status(400).json({ error: 'invalid room' });
+  if (roomOwners[room] !== token) return res.status(401).json({ error: 'only the room creator can delete this room' });
+  delete chats[room];
+  delete roomOwners[room];
+  saveChats(); saveOwners();
+  io.to(room).emit('system', { ts: Date.now(), text: 'this room was deleted by its creator', kind: 'delete' });
+  log('chat_delete', `room=${room} (creator)`, req);
+  res.json({ ok: true });
+});
+
+io.on('connection', (socket) => {
+  let room = null, name = 'anonymous', isPrivateAdmin = false;
+
+  socket.on('join', ({ room: r, name: n, pw }, ack) => {
     room = roomName(r);
     name = String(n || 'anonymous').slice(0, 30);
+    isPrivateAdmin = String(pw || '') === PRIVATE_ADMIN_PASSWORD && !!PRIVATE_ADMIN_PASSWORD;
     if (!room) { socket.emit('system', { ts: Date.now(), text: 'invalid room' }); return; }
     socket.join(room);
-    socket.data.room = room; socket.data.name = name;
+    socket.data.room = room; socket.data.name = name; socket.data.admin = isPrivateAdmin;
     socket.emit('history', chatHistory(room));
-    io.to(room).emit('system', { ts: Date.now(), text: `${name} joined the room`, kind: 'join' });
-    log('chat_join', `room=${room} name=${name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
-    if (ack) ack({ ok: true });
+    socket.emit('role', { admin: isPrivateAdmin, owner: !!roomOwners[room] });
+    io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
+    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+    if (ack) ack({ ok: true, admin: isPrivateAdmin });
   });
 
-  socket.on('msg', ({ text }) => {
+  socket.on('msg', ({ text, image }) => {
     if (!room) return;
     const t = String(text || '').slice(0, 4000);
-    if (!t.trim()) return;
+    const img = String(image || '').slice(0, 2000);
+    if (!t.trim() && !img) return;
     const msg = { ts: Date.now(), name, text: t, id: newId() };
+    if (img) msg.image = img;
+    if (isPrivateAdmin) msg.admin = true;
     saveChat(room, msg);
     io.to(room).emit('msg', msg);
-    log('chat_msg', `room=${room} len=${t.length}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+  });
+
+  /* delete a single message: own messages always; any message if private admin */
+  socket.on('delmsg', ({ id }) => {
+    if (!room) return;
+    const list = chats[room] || [];
+    const i = list.findIndex(m => m.id === id);
+    if (i === -1) return;
+    if (!isPrivateAdmin && list[i].name !== name) return;
+    const [removed] = list.splice(i, 1);
+    saveChats();
+    io.to(room).emit('delmsg', { id });
+    log('chat_msg_del', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
   });
 
   socket.on('typing', (isTyping) => {
@@ -408,4 +498,5 @@ server.listen(PORT, () => {
   if (process.env.ADMIN_PASSWORD) console.log('Admin password: supplied via ADMIN_PASSWORD env var');
   else console.log(`Default admin password: ${ADMIN_PASSWORD_DEFAULT}  (change it in the admin panel)`);
   console.log(`Data dir: ${DATA_DIR} · Uploads dir: ${UPLOAD_DIR}`);
+  console.log(`Private-admin password: ${PRIVATE_ADMIN_PASSWORD}${process.env.PRIVATE_ADMIN_PASSWORD ? ' (from env)' : ' — set PRIVATE_ADMIN_PASSWORD env to change'}`);
 });

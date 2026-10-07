@@ -30,6 +30,7 @@ node server.js
 | `DATA_DIR` | `./data` | where json stores live |
 | `UPLOAD_DIR` | `./uploads` | where uploaded files live |
 | `COOKIE_SECURE` | `0` | set `1` when serving over HTTPS |
+| `PRIVATE_ADMIN_PASSWORD` | `privateadmin` | password for the private chat super-admin |
 
 ## 🚀 Deploy to the internet (so it's not tied to your PC)
 
@@ -93,6 +94,12 @@ and free HTTPS. (The site then *is* still hosted on your PC, but the URL is publ
 ### Private chat (`/private`)
 - Create a room or join one with a code — rooms are never listed anywhere
 - Share the link `https://yoursite/private#roomcode` so others join directly
+- **Send images** (🖼️ button or paste an image, up to 25 MB)
+- Delete your own messages (hover a message → ✕)
+- The **creator** of a room can delete the whole room (🗑 Delete room in the header)
+- **Private admin** — enter the private-admin password on the gate page to browse
+  **all** rooms, read every message, delete any message, and delete any room.
+  Set the password with the `PRIVATE_ADMIN_PASSWORD` env var (default: `privateadmin`)
 - Real-time messaging (Socket.IO), typing indicators, join/leave notices
 - Message history kept per room
 

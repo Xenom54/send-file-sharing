@@ -432,6 +432,20 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
   box-shadow: 0 4px 16px rgba(124, 108, 255, .14);
 }
 .msg .time { font-size: .68rem; color: var(--text-3); padding-right: 3px; font-family: var(--mono); }
+.msg .bubble { position: relative; }
+.msg-del {
+  position: absolute; top: -7px; right: -7px;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border-2); background: #141a28; color: var(--danger);
+  font-size: .68rem; cursor: pointer; opacity: 0;
+  transition: opacity .15s; display: grid; place-items: center; padding: 0;
+}
+.msg:hover .msg-del, .msg.mine:hover .msg-del { opacity: 1; }
+.msg-del:hover { background: rgba(251, 113, 133, .2); border-color: rgba(251, 113, 133, .6); }
+.chat-img { max-width: 100%; max-height: 260px; border-radius: 9px; display: block; cursor: zoom-in; border: 1px solid var(--border); margin-bottom: 4px; }
+.msg .msg-text { word-break: break-word; }
+.msg.mine .msg-del { left: -7px; right: auto; }
+.admin-msg .who { color: #c4b5fd; }
 .sys { text-align: center; color: var(--text-3); font-size: .75rem; padding: 2px 0; }
 .sys span { background: var(--surface-2); padding: 3px 12px; border-radius: 99px; border: 1px solid var(--border); }
 .typing-ind { font-size: .76rem; color: var(--text-3); min-height: 18px; padding: 0 6px; font-style: italic; }
