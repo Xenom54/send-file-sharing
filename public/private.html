@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#07080f">
+  <title>Send — Private Chat</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
+      <div class="nav-links">
+        <a href="/">← Home</a>
+        <a href="/private" class="active">Private</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- gate -->
+  <div class="card gate" id="gate">
+    <h2>💬 Private chat</h2>
+    <div class="sub">Create a room or join one with a code. Rooms aren't listed anywhere — only people with the code can enter.</div>
+    <div class="field">
+      <label class="fl">Your name</label>
+      <input type="text" id="gateName" placeholder="e.g. Alex" maxlength="30">
+    </div>
+    <button class="btn primary" id="btnCreate" style="width:100%">✨ Create a new room</button>
+    <div class="or-divider">or join an existing room</div>
+    <div class="row">
+      <input type="text" id="gateRoom" placeholder="room code" maxlength="40" style="text-transform:lowercase" autocomplete="off">
+      <button class="btn" id="btnJoin">Join</button>
+    </div>
+    <div id="myRooms" style="margin-top:20px"></div>
+  </div>
+
+  <!-- chat -->
+  <div class="wrap hidden" id="chatWrap">
+    <div class="chat-app">
+      <div class="card panel">
+        <div class="ph">Rooms</div>
+        <div class="room-list" id="roomList"></div>
+        <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ New room</button>
+      </div>
+      <div class="card chat-main">
+        <div class="chat-header">
+          <span style="font-size:1.25rem">💬</span>
+          <span class="hash">#</span><span class="room-title" id="roomTitle">—</span>
+          <span class="right">
+            <button class="btn small" id="btnShare">🔗 Share</button>
+            <button class="btn small ghost" id="btnLeave">Leave</button>
+          </span>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="typing-ind" id="typingInd"></div>
+        <div class="chat-input">
+          <input type="text" id="msgInput" placeholder="Type a message…" autocomplete="off" maxlength="4000">
+          <button class="btn primary" id="btnSend">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/static/private.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "send-file-sharing",
+  "version": "1.0.0",
+  "description": "Self-hosted file/message sharing site with admin panel and private chat",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["file-sharing", "upload", "admin-panel", "chat", "self-hosted"],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "multer": "^2.4.0",
+    "socket.io": "^4.8.4"
+  }
+}

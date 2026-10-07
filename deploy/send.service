@@ -1,0 +1,18 @@
+[Unit]
+Description=Send file sharing server
+After=network.target
+
+[Service]
+Type=simple
+User=send
+WorkingDirectory=/opt/send
+Environment=PORT=3000
+Environment=ADMIN_PASSWORD=CHANGE_ME_PLEASE
+Environment=DATA_DIR=/opt/send/data
+Environment=UPLOAD_DIR=/opt/send/uploads
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+node_modules
+npm-cache
+.npm-cache
+.edge-profile
+*.png
+.env
+.DS_Store
+
+# PRIVATE DATA — never upload these
+data/
+uploads/

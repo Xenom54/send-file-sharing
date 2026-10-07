@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07080f">
+  <title>Send — Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
+      <div class="nav-links">
+        <a href="/">← Home</a>
+        <a href="/admin" class="active">Admin</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- login gate -->
+  <div class="card admin-login" id="loginCard">
+    <div class="lock-ic">🛡️</div>
+    <h2>Admin panel</h2>
+    <div class="sub">Restricted area. Enter the admin password to continue.</div>
+    <div class="field">
+      <label class="fl">Password</label>
+      <input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn primary" id="btnLogin" style="width:100%">Log in →</button>
+    <div class="login-hint" id="loginHint">Default password: <code>admin123</code> — change it right after your first login.</div>
+  </div>
+
+  <!-- dashboard -->
+  <div class="wrap hidden" id="dash">
+    <div class="hero">
+      <div style="flex:1">
+        <h1>Admin dashboard</h1>
+        <p>Visitors, uploads, IP addresses, deleted items and server activity — all in one place.</p>
+      </div>
+      <button class="btn small" id="btnLogout">Log out</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="tabs-admin" id="adminTabs">
+      <button class="tab active" data-atab="logs">📜 Logs &amp; IPs</button>
+      <button class="tab" data-atab="items">📦 All items</button>
+      <button class="tab" data-atab="trash">🗑️ Recycle bin <span id="trashCount"></span></button>
+      <button class="tab" data-atab="settings">⚙️ Settings</button>
+    </div>
+
+    <!-- logs -->
+    <div class="apane" id="apane-logs">
+      <div class="toolbar">
+        <select id="logFilter">
+          <option value="all">All activity</option>
+          <option value="visit">Visits</option>
+          <option value="upload">Uploads</option>
+          <option value="download">Downloads</option>
+          <option value="delete">Deletions</option>
+          <option value="restore">Restores</option>
+          <option value="purge">Purges</option>
+          <option value="admin_login">Admin logins</option>
+          <option value="chat_join">Chat joins</option>
+          <option value="chat_msg">Chat messages</option>
+        </select>
+        <span class="spacer"></span>
+        <span class="small muted" id="logCount"></span>
+        <button class="btn small danger" id="btnClearLogs">Clear all logs</button>
+      </div>
+      <div class="card tablewrap">
+        <table class="logtable">
+          <thead><tr><th>Time</th><th>Action</th><th>IP address</th><th>Detail</th><th>User agent</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- all items -->
+    <div class="apane hidden" id="apane-items">
+      <div class="card tablewrap">
+        <table class="logtable">
+          <thead><tr><th>Time</th><th>Type</th><th>Title / name</th><th>Size</th><th>Uploader IP</th><th>Status</th><th></th></tr></thead>
+          <tbody id="allBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- recycle bin -->
+    <div class="apane hidden" id="apane-trash">
+      <div class="grid" id="trashGrid"></div>
+    </div>
+
+    <!-- settings -->
+    <div class="apane hidden" id="apane-settings">
+      <div class="card" style="max-width:480px;padding:26px">
+        <h3 style="margin-bottom:6px;font-size:1.05rem">Change admin password</h3>
+        <p class="small muted" style="margin-bottom:16px">All admin sessions are logged out after changing it.</p>
+        <div class="field">
+          <label class="fl">New password</label>
+          <input type="password" id="newPw" placeholder="At least 6 characters" autocomplete="new-password">
+        </div>
+        <button class="btn primary" id="btnChangePw">Update password</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

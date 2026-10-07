@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#07080f">
+  <title>Send — Share everything</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📨</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
+      <div class="nav-links">
+        <a href="/" class="active">Home</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="wrap">
+    <div class="hero">
+      <div style="flex:1; min-width: 260px">
+        <h1>Share anything,<br>instantly.</h1>
+        <p>Text notes, files, images and voice recordings — drag &amp; drop, paste, or record straight from your browser. Everything is stored and ready to share.</p>
+      </div>
+      <div class="spacer"></div>
+      <div class="small muted" style="text-align:right">
+        <div>⚡ up to 20 GB per file</div>
+        <div>🔒 stored on your server</div>
+      </div>
+    </div>
+
+    <!-- composer -->
+    <div class="card composer">
+      <div class="tabs" id="composerTabs">
+        <button class="tab active" data-tab="text">✍️ Text</button>
+        <button class="tab" data-tab="file">📁 File</button>
+        <button class="tab" data-tab="audio">🎙️ Audio</button>
+      </div>
+
+      <!-- text -->
+      <div id="pane-text" class="tabpane">
+        <div>
+          <label class="fl">Title (optional)</label>
+          <input type="text" id="textTitle" placeholder="Give your note a title…">
+        </div>
+        <div class="mt">
+          <label class="fl">Message / text</label>
+          <textarea id="textBody" placeholder="Type or paste anything here…"></textarea>
+        </div>
+        <div class="mt" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+          <button class="btn primary" id="btnSendText">Send text →</button>
+          <span class="small muted">Tip: Ctrl/Cmd + V pastes images directly</span>
+        </div>
+      </div>
+
+      <!-- file -->
+      <div id="pane-file" class="tabpane hidden">
+        <div class="dropzone" id="dropzone">
+          <div class="dz-icon">⬆️</div>
+          <div class="dz-title">Drop files here or click to browse</div>
+          <div class="dz-hint">Any file type · up to 20 GB · multiple files at once</div>
+          <input type="file" id="fileInput" multiple hidden>
+        </div>
+        <div class="mt">
+          <label class="fl">Title (optional)</label>
+          <input type="text" id="fileTitle" placeholder="File title…">
+        </div>
+        <div id="uploadQueue"></div>
+      </div>
+
+      <!-- audio -->
+      <div id="pane-audio" class="tabpane hidden">
+        <div class="rec-row">
+          <button class="rec-mic" id="btnRec" title="Start recording">🎙️</button>
+          <div>
+            <div style="font-weight:700">Voice recording</div>
+            <div class="small muted" id="recHint">Press the mic to record from your microphone.</div>
+          </div>
+          <span class="rec-timer hidden" id="recTimer">00:00</span>
+        </div>
+        <div id="recList" class="mt"></div>
+      </div>
+    </div>
+
+    <!-- items -->
+    <div class="items-head">
+      <h2>Saved items</h2>
+      <span class="count" id="itemCount"></span>
+      <button class="btn small ghost right" id="btnRefresh">↻ Refresh</button>
+    </div>
+    <div class="grid" id="items"></div>
+  </div>
+
+  <footer class="footer">
+    <div class="logo-sm">📨 Send · self-hosted file sharing</div>
+  </footer>
+
+  <div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
+
+  <!-- delete auth modal -->
+  <div class="lightbox" id="delModal">
+    <div class="card" style="max-width:420px;width:calc(100% - 32px);padding:26px;text-align:center">
+      <div class="lock-ic" style="margin-bottom:14px">🗑️</div>
+      <h3 style="font-size:1.15rem;font-weight:800">Delete this item?</h3>
+      <p class="small muted" style="margin:8px 0 16px;line-height:1.55">Deleting needs the admin password. The item is moved to the admin recycle bin, so it can be restored later.</p>
+      <input type="password" id="delPw" placeholder="Admin password" autocomplete="current-password" style="text-align:left">
+      <div class="small" id="delError" style="color:var(--danger);margin-top:8px;min-height:16px;font-weight:600"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn" id="delCancel" style="flex:1">Cancel</button>
+        <button class="btn danger" id="delConfirm" style="flex:1">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
