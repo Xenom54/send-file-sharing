@@ -6,7 +6,13 @@
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": ["file-sharing", "upload", "admin-panel", "chat", "self-hosted"],
+  "keywords": [
+    "file-sharing",
+    "upload",
+    "admin-panel",
+    "chat",
+    "self-hosted"
+  ],
   "author": "",
   "license": "MIT",
   "type": "commonjs",
@@ -14,6 +20,7 @@
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
+    "megajs": "^1.3.10",
     "multer": "^2.4.0",
     "socket.io": "^4.8.4"
   }

@@ -10,6 +10,7 @@ RUN npm ci --omit=dev || npm install --omit=dev
 COPY server.js ./
 COPY drive.js ./
 COPY github-backup.js ./
+COPY mega-backup.js ./
 COPY public ./public
 
 # persistent data volumes

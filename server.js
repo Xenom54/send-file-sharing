@@ -8,6 +8,7 @@ const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 const backup = require('./github-backup');
+const mega = require('./mega-backup');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
@@ -47,10 +48,10 @@ const roomOwners = readJSON(paths.owners, {});
 if (!Array.isArray(items)) items.length = 0;
 if (!roomOwners || typeof roomOwners !== 'object' || Array.isArray(roomOwners)) for (const k of Object.keys(roomOwners)) delete roomOwners[k];
 
-function saveItems() { writeJSON(paths.items, items); backupPush('data', 'items.json'); }
-function saveLogs() { writeJSON(paths.logs, logs); backupPush('data', 'logs.json'); }
-function saveChats() { writeJSON(paths.chats, chats); backupPush('data', 'chats.json'); }
-function saveOwners() { writeJSON(paths.owners, roomOwners); backupPush('data', 'owners.json'); }
+function saveItems() { writeJSON(paths.items, items); backupPush('data', 'items.json'); megaPush('data', 'items.json'); }
+function saveLogs() { writeJSON(paths.logs, logs); backupPush('data', 'logs.json'); megaPush('data', 'logs.json'); }
+function saveChats() { writeJSON(paths.chats, chats); backupPush('data', 'chats.json'); megaPush('data', 'chats.json'); }
+function saveOwners() { writeJSON(paths.owners, roomOwners); backupPush('data', 'owners.json'); megaPush('data', 'owners.json'); }
 
 /* --- GitHub backup (backup-only, fire-and-forget, debounced) --- */
 function backupName(prefix, name) { return `${prefix}/${name}`; }
@@ -72,6 +73,27 @@ function backupPushUpload(fileName) {
   if (!fs.existsSync(abs)) return;
   backup.put(backupName('uploads', fileName), abs)
     .catch(e => console.error('[backup] push upload', fileName, e.message));
+}
+
+/* --- MEGA cloud backup (primary: stores everything, no 100 MB cap) --- */
+const megaTimers = {};
+function megaPush(prefix, name) {
+  if (!mega.configured()) return;
+  const key = prefix + '/' + name;
+  if (megaTimers[key]) clearTimeout(megaTimers[key]);
+  megaTimers[key] = setTimeout(() => {
+    const abs = path.join(prefix === 'data' ? DATA_DIR : UPLOAD_DIR, name);
+    if (!fs.existsSync(abs)) return;
+    mega.put(prefix, name, abs)
+      .catch(e => console.error('[mega] push', name, e.message));
+  }, 8000);
+}
+function megaPushUpload(fileName) {
+  if (!mega.configured()) return;
+  const abs = path.join(UPLOAD_DIR, fileName);
+  if (!fs.existsSync(abs)) return;
+  mega.put('uploads', fileName, abs)
+    .catch(e => console.error('[mega] push upload', fileName, e.message));
 }
 
 function log(action, detail, req) {
@@ -245,6 +267,7 @@ app.post('/api/items/upload', upload.single('file'), (req, res) => {
   };
   items.push(it); saveItems();
   backupPushUpload(it.fileName);
+  megaPushUpload(it.fileName);
   log('upload', `${it.type}: ${it.originalName} (${it.size} bytes)`, req);
   res.json(publicItem(it));
 });
@@ -266,6 +289,7 @@ app.post('/api/items/audio', upload.single('audio'), (req, res) => {
   };
   items.push(it); saveItems();
   backupPushUpload(it.fileName);
+  megaPushUpload(it.fileName);
   log('upload', `audio: ${it.title}`, req);
   res.json(publicItem(it));
 });
@@ -282,15 +306,18 @@ app.delete('/api/items/:id', requireAdmin, (req, res) => {
 app.get('/uploads/:filename', async (req, res) => {
   const fn = path.basename(req.params.filename);
   const p = path.join(UPLOAD_DIR, fn);
-  // file missing locally? try pulling it from the backup (covers restore-in-progress)
-  if (!fs.existsSync(p) && backup.configured()) {
+  // file missing locally? try pulling it from a backup (covers restore-in-progress)
+  if (!fs.existsSync(p) && (mega.configured() || backup.configured())) {
     try {
-      const f = await backup.getFile('uploads/' + fn);
-      if (f && f.content) {
-        fs.writeFileSync(p, Buffer.from(f.content, 'base64'));
-        log('backup_restore', fn, req);
-      }
+      if (mega.configured()) await mega.downloadTo('uploads', fn, p);
     } catch {}
+    if (!fs.existsSync(p) && backup.configured()) {
+      try {
+        const f = await backup.getFile('uploads/' + fn);
+        if (f && f.content) fs.writeFileSync(p, Buffer.from(f.content, 'base64'));
+      } catch {}
+    }
+    if (fs.existsSync(p)) log('backup_restore', fn, req);
   }
   if (!fs.existsSync(p)) return res.status(404).send('Not found');
   if (req.query.download === '1') {
@@ -361,6 +388,7 @@ app.delete('/api/admin/items/:id/purge', requireAdmin, (req, res) => {
   if (it.fileName) {
     try { fs.unlinkSync(path.join(UPLOAD_DIR, it.fileName)); } catch {}
     if (backup.configured()) backup.remove('uploads/' + it.fileName).catch(e => console.error('[backup] remove', e.message));
+    if (mega.configured()) mega.remove('uploads', it.fileName).catch(e => console.error('[mega] remove', e.message));
   }
   saveItems();
   log('purge', it.title, req);
@@ -427,6 +455,7 @@ const chatUpload = multer({
 app.post('/api/chat/upload', chatUpload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no image or type rejected' });
   backupPushUpload(req.file.filename);
+  megaPushUpload(req.file.filename);
   log('chat_image', req.file.originalname, req);
   res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename) });
 });
@@ -553,28 +582,67 @@ io.on('connection', (socket) => {
   });
 });
 
-/* --- restore from backup (only when local data is EMPTY, e.g. after a redeploy) --- */
-async function backupRestoreData() {
-  const files = [
-    ['items.json', paths.items],
-    ['logs.json', paths.logs],
-    ['chats.json', paths.chats],
-    ['owners.json', paths.owners],
-  ];
+/* --- restore from backups (only when local data is EMPTY, e.g. after a redeploy) --- */
+const RESTORE_DATA_FILES = [
+  ['items.json', paths.items],
+  ['logs.json', paths.logs],
+  ['chats.json', paths.chats],
+  ['owners.json', paths.owners],
+];
+
+/* MEGA first (full fidelity), GitHub fills any still-missing files */
+async function megaRestoreData() {
+  if (!mega.configured()) return 0;
   let restored = 0;
-  for (const [name, target] of files) {
+  for (const [name, target] of RESTORE_DATA_FILES) {
+    if (fs.existsSync(target)) continue;
+    try {
+      const buf = await mega.getBuffer('data', name);
+      if (buf) { fs.writeFileSync(target, buf); restored++; }
+    } catch (e) { console.error('[mega] restore', name, e.message); }
+  }
+  console.log(`[mega] restored ${restored}/4 data files`);
+  return restored;
+}
+
+async function backupRestoreData() {
+  if (!backup.configured()) return 0;
+  let restored = 0;
+  for (const [name, target] of RESTORE_DATA_FILES) {
+    if (fs.existsSync(target)) continue;
     try {
       const f = await backup.getFile('data/' + name);
       if (f && f.content) { fs.writeFileSync(target, Buffer.from(f.content, 'base64')); restored++; }
     } catch (e) { console.error('[backup] restore', name, e.message); }
   }
   console.log(`[backup] restored ${restored}/4 data files`);
+  return restored;
+}
+
+async function megaRestoreUploads() {
+  if (!mega.configured()) return 0;
+  try {
+    const list = await mega.list('uploads');
+    let n = 0;
+    for (const e of list) {
+      if (!e.name || e.name.includes('/') || e.name.includes('\\') || e.name.startsWith('.')) continue;
+      const target = path.join(UPLOAD_DIR, e.name);
+      if (fs.existsSync(target)) continue;
+      try {
+        const ok = await mega.downloadTo('uploads', e.name, target);
+        if (ok) n++;
+      } catch (err) { console.error('[mega] restore upload', e.name, err.message); }
+    }
+    if (n) console.log(`[mega] restored ${n} uploaded files`);
+    return n;
+  } catch (e) { console.error('[mega] restore uploads failed', e.message); return 0; }
 }
 
 async function backupRestoreUploads() {
+  if (!backup.configured()) return 0;
   try {
     const list = await backup.listDir('uploads');
-    if (!Array.isArray(list)) return;
+    if (!Array.isArray(list)) return 0;
     let n = 0;
     for (const e of list) {
       if (e.type !== 'file') continue;
@@ -586,27 +654,31 @@ async function backupRestoreUploads() {
       } catch (err) { console.error('[backup] restore upload', e.name, err.message); }
     }
     if (n) console.log(`[backup] restored ${n} uploaded files`);
-  } catch (e) { console.error('[backup] restore uploads failed', e.message); }
+    return n;
+  } catch (e) { console.error('[backup] restore uploads failed', e.message); return 0; }
 }
 
-/* boot: local data stays authoritative; GitHub repo is a backup.
+/* boot: local data stays authoritative; MEGA + GitHub are backups.
    Restore ONLY when local data is empty (fresh instance after a redeploy) —
    never on every boot, and never overwrites data that exists locally. */
 (async function boot() {
   backup.setup();
+  mega.setup();
 
-  if (backup.configured()) {
-    const localItems = readJSON(paths.items, []);
-    if (!Array.isArray(localItems) || localItems.length === 0) {
-      console.log('[backup] local data empty — restoring from backup…');
-      await backupRestoreData();
+  const localItems = readJSON(paths.items, []);
+  if (!Array.isArray(localItems) || localItems.length === 0) {
+    if (mega.configured() || backup.configured()) {
+      console.log('[backup] local data empty — restoring from cloud backup…');
+      await megaRestoreData();     // MEGA first (has everything)
+      await backupRestoreData();   // GitHub fills any gaps
       items.length = 0; items.push(...readJSON(paths.items, []));
       logs.length = 0; logs.push(...readJSON(paths.logs, []));
       for (const k of Object.keys(chats)) delete chats[k];
       Object.assign(chats, readJSON(paths.chats, {}));
       for (const k of Object.keys(roomOwners)) delete roomOwners[k];
       Object.assign(roomOwners, readJSON(paths.owners, {}));
-      backupRestoreUploads(); // background, non-blocking
+      // restore uploaded files in the background: MEGA first, GitHub after
+      megaRestoreUploads().then(() => backupRestoreUploads()).catch(() => {});
     }
   }
 
@@ -618,6 +690,7 @@ async function backupRestoreUploads() {
     else console.log(`Default admin password: ${ADMIN_PASSWORD_DEFAULT}  (change it in the admin panel)`);
     console.log(`Data dir: ${DATA_DIR} · Uploads dir: ${UPLOAD_DIR}`);
     console.log(`Private-admin password: ${PRIVATE_ADMIN_PASSWORD}${process.env.PRIVATE_ADMIN_PASSWORD ? ' (from env)' : ' — set PRIVATE_ADMIN_PASSWORD env to change'}`);
+    console.log(mega.configured() ? 'MEGA backup: ENABLED (push on change + restore when empty)' : 'MEGA backup: not configured');
     console.log(backup.configured() ? 'GitHub backup: ENABLED (push on change + restore when empty)' : 'GitHub backup: not configured');
   });
 })();
