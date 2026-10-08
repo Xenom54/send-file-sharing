@@ -39,19 +39,32 @@ function encPath(p) {
 
 const MAX_BYTES = 100 * 1024 * 1024; // GitHub hard limit per file
 
+/* health/status info for the admin dashboard */
+const status = { pushCount: 0, lastPushAt: null, lastError: null, lastErrorAt: null };
+
 async function put(remotePath, localPath) {
-  const content = fs.readFileSync(localPath);
-  if (content.length > MAX_BYTES) throw new Error('file > 100 MB, skipped');
-  const body = { message: 'backup ' + remotePath, content: content.toString('base64'), branch: 'main' };
   try {
-    const existing = await api(`/repos/${cfg.repo}/contents/${encPath(remotePath)}`);
-    if (existing && existing.sha) body.sha = existing.sha;
-  } catch { /* new file */ }
-  await api(`/repos/${cfg.repo}/contents/${encPath(remotePath)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+    const content = fs.readFileSync(localPath);
+    if (content.length > MAX_BYTES) throw new Error('file > 100 MB, skipped');
+    const body = { message: 'backup ' + remotePath, content: content.toString('base64'), branch: 'main' };
+    try {
+      const existing = await api(`/repos/${cfg.repo}/contents/${encPath(remotePath)}`);
+      if (existing && existing.sha) body.sha = existing.sha;
+    } catch { /* new file */ }
+    await api(`/repos/${cfg.repo}/contents/${encPath(remotePath)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    status.pushCount++; status.lastPushAt = Date.now(); status.lastError = null;
+  } catch (e) {
+    status.lastError = String(e.message || e); status.lastErrorAt = Date.now();
+    throw e;
+  }
+}
+
+function info() {
+  return { configured: !!cfg, repo: cfg ? cfg.repo : null, ...status };
 }
 
 async function remove(remotePath) {
@@ -93,4 +106,4 @@ async function getFile(remotePath) {
   return { content: blob.content };
 }
 
-module.exports = { configured, setup, put, remove, listDir, getFile };
+module.exports = { configured, setup, put, remove, listDir, getFile, info };

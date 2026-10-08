@@ -18,6 +18,11 @@ let dataDir = null;      // "data" subfolder
 let uploadsDir = null;   // "uploads" subfolder
 let connecting = null;   // in-flight connect promise
 
+/* health/status info for the admin dashboard */
+const status = { pushCount: 0, lastPushAt: null, lastError: null, lastErrorAt: null };
+function markPush() { status.pushCount++; status.lastPushAt = Date.now(); status.lastError = null; }
+function markError(e) { status.lastError = String(e.message || e); status.lastErrorAt = Date.now(); }
+
 /* RAM-safety cap on Render free tier (512 MB) */
 const MAX_BYTES = 500 * 1024 * 1024;
 
@@ -92,25 +97,28 @@ async function deleteNode(node) {
    Uploads the new version FIRST, then deletes the old node (no backup gap). */
 async function put(prefix, name, localPath) {
   if (!configured()) throw new Error('MEGA backup not configured');
-  const size = fs.statSync(localPath).size;
-  if (size > MAX_BYTES) throw new Error(`file over ${Math.round(MAX_BYTES / 1048576)} MB, skipped`);
-  await connect();
-  const dir = dirFor(prefix);
-  const oldFiles = (dir.children || []).filter(c => c.name === name && !c.directory);
+  try {
+    const size = fs.statSync(localPath).size;
+    if (size > MAX_BYTES) throw new Error(`file over ${Math.round(MAX_BYTES / 1048576)} MB, skipped`);
+    await connect();
+    const dir = dirFor(prefix);
+    const oldFiles = (dir.children || []).filter(c => c.name === name && !c.directory);
 
-  let upload;
-  if (prefix === 'data') {
-    // JSON files are small — snapshot into a buffer so later saves can't corrupt the upload
-    upload = dir.upload({ name }, fs.readFileSync(localPath));
-  } else {
-    // uploads can be big — stream from disk
-    upload = dir.upload({ name, size }, fs.createReadStream(localPath));
-  }
-  await upload.complete;
+    let upload;
+    if (prefix === 'data') {
+      // JSON files are small — snapshot into a buffer so later saves can't corrupt the upload
+      upload = dir.upload({ name }, fs.readFileSync(localPath));
+    } else {
+      // uploads can be big — stream from disk
+      upload = dir.upload({ name, size }, fs.createReadStream(localPath));
+    }
+    await upload.complete;
 
-  for (const old of oldFiles) {
-    try { await deleteNode(old); } catch (e) { console.error('[mega] prune old', name, e.message); }
-  }
+    for (const old of oldFiles) {
+      try { await deleteNode(old); } catch (e) { console.error('[mega] prune old', name, e.message); }
+    }
+    markPush();
+  } catch (e) { markError(e); throw e; }
 }
 
 /* delete a file from the backup */
@@ -163,4 +171,27 @@ async function accountInfo() {
   return storage.getAccountInfo();
 }
 
-module.exports = { configured, setup, put, remove, getBuffer, list, downloadTo, accountInfo, MAX_BYTES };
+/* full status for the admin dashboard */
+async function info() {
+  if (!configured()) return { configured: false, ...status };
+  try {
+    const acc = await accountInfo();
+    const dataFiles = await list('data');
+    const uploadFiles = await list('uploads');
+    return {
+      configured: true,
+      connected: true,
+      folder: cfg.folder,
+      spaceUsedMB: +(acc.spaceUsed / 1048576).toFixed(1),
+      spaceTotalGB: +(acc.spaceTotal / 1073741824).toFixed(1),
+      dataFiles: dataFiles.length,
+      uploadFiles: uploadFiles.length,
+      backupBytes: dataFiles.reduce((s, f) => s + (f.size || 0), 0) + uploadFiles.reduce((s, f) => s + (f.size || 0), 0),
+      ...status,
+    };
+  } catch (e) {
+    return { configured: true, connected: false, error: String(e.message || e), ...status };
+  }
+}
+
+module.exports = { configured, setup, put, remove, getBuffer, list, downloadTo, accountInfo, info, MAX_BYTES };

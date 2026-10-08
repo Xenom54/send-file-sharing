@@ -131,19 +131,24 @@ function joinRoom(code) {
   const name = store.name || 'anonymous';
   store.name = name;
   currentRoom = code;
-  iAmAdmin = false;
   iAmOwner = code === 'public' ? false : !!store.ownerToken(code);
   $('#roomTitle').textContent = code;
   $('#roomIcon').textContent = code === 'public' ? '🌍' : '💬';
-  $('#adminBadge').classList.add('hidden');
+  if (!iAmAdmin) $('#adminBadge').classList.add('hidden');
   $('#btnDeleteRoom').style.display = 'none';
   $('#messages').innerHTML = '';
   $('#msgInput').value = '';
   $('#typingInd').textContent = '';
-  socket.emit('join', { room: code, name, uid: store.uid }, (ack) => {
+  $('#membersPanel').classList.toggle('hidden', !iAmAdmin);
+  const pw = sessionStorage.getItem('send_privateadmin_pw') || '';
+  socket.emit('join', { room: code, name, uid: store.uid, pw }, (ack) => {
     addRoom(code);
     renderRoomList();
-    if (ack && ack.admin) { iAmAdmin = true; $('#adminBadge').classList.remove('hidden'); }
+    if (ack && ack.admin) {
+      iAmAdmin = true;
+      $('#adminBadge').classList.remove('hidden');
+      $('#membersPanel').classList.remove('hidden');
+    }
     refreshDeleteRoomBtn();
   });
   $('#msgInput').focus();
@@ -155,6 +160,55 @@ function refreshDeleteRoomBtn() {
   const canDelete = iAmAdmin || iAmOwner;
   $('#btnDeleteRoom').style.display = canDelete ? '' : 'none';
 }
+
+/* --------------------- admin unlock (members list + tools) ------------------ */
+$('#btnAdminUnlock').addEventListener('click', () => {
+  if (iAmAdmin) return toast('✓ Admin mode already active');
+  $('#adminPwInput').value = '';
+  $('#adminPwError').textContent = '';
+  $('#adminModal').classList.add('open');
+  setTimeout(() => $('#adminPwInput').focus(), 60);
+});
+$('#adminCancel').addEventListener('click', () => $('#adminModal').classList.remove('open'));
+$('#adminModal').addEventListener('click', e => { if (e.target.id === 'adminModal') $('#adminModal').classList.remove('open'); });
+$('#adminPwInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#adminConfirm').click(); });
+
+$('#adminConfirm').addEventListener('click', async () => {
+  const pw = $('#adminPwInput').value;
+  if (!pw) return;
+  const btn = $('#adminConfirm');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  try {
+    const r = await fetch('/api/privateadmin/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pw }),
+    });
+    if (r.ok) {
+      sessionStorage.setItem('send_privateadmin_pw', pw);
+      $('#adminModal').classList.remove('open');
+      iAmAdmin = true;
+      $('#adminBadge').classList.remove('hidden');
+      $('#membersPanel').classList.remove('hidden');
+      toast('🛡️ Admin mode active');
+      // re-join with the password so the server recognizes admin rights
+      socket.emit('join', { room: currentRoom, name: store.name || 'anonymous', uid: store.uid, pw }, (ack) => {
+        if (ack && ack.admin) { refreshDeleteRoomBtn(); }
+      });
+    } else {
+      $('#adminPwError').textContent = 'Wrong password';
+      $('#adminPwInput').value = '';
+    }
+  } catch { $('#adminPwError').textContent = 'Connection failed'; }
+  btn.disabled = false; btn.textContent = 'Unlock';
+});
+
+/* live presence updates (only the server sends these to admin sockets) */
+socket.on('presence', ({ room, online }) => {
+  if (!iAmAdmin || room !== currentRoom) return;
+  $('#membersCount').textContent = (online || []).length;
+  $('#membersList').innerHTML = (online || []).length
+    ? online.map(u => `<div class="member-row"><span class="dot on"></span>${esc(u.name)}${u.admin ? ' 🛡️' : ''}</div>`).join('')
+    : '<div class="small muted">Nobody else online.</div>';
+});
 
 /* ------------------------------- send / img ------------------------------- */
 function send() {

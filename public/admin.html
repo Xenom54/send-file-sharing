@@ -6,20 +6,20 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-inner">
       <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
       <div class="nav-links">
-        <a href="/">← Home</a>
+        <a href="/">Site</a>
         <a href="/admin" class="active">Admin</a>
       </div>
     </div>
   </nav>
 
-  <!-- login gate -->
+  <!-- login -->
   <div class="card admin-login" id="loginCard">
     <div class="lock-ic">🛡️</div>
     <h2>Admin panel</h2>
@@ -36,48 +36,67 @@
     <div class="hero">
       <div style="flex:1">
         <h1>Admin dashboard</h1>
-        <p>Visitors, uploads, IP addresses, deleted items and server activity — all in one place.</p>
+        <p>Overview, activity, moderation and settings.</p>
       </div>
-      <button class="btn small" id="btnLogout">Log out</button>
+      <a class="btn small" href="/privateadmin">🛡️ Private admin →</a>
+      <button class="btn small ghost" id="btnLogout">Log out</button>
     </div>
 
-    <div class="stats" id="stats"></div>
-
     <div class="tabs-admin" id="adminTabs">
-      <button class="tab active" data-atab="logs">📜 Logs &amp; IPs</button>
-      <button class="tab" data-atab="items">📦 All items</button>
+      <button class="tab active" data-atab="overview">📊 Overview</button>
+      <button class="tab" data-atab="logs">📜 Activity</button>
+      <button class="tab" data-atab="items">📦 Items</button>
       <button class="tab" data-atab="trash">🗑️ Recycle bin <span id="trashCount"></span></button>
       <button class="tab" data-atab="settings">⚙️ Settings</button>
     </div>
 
-    <!-- logs -->
-    <div class="apane" id="apane-logs">
-      <div class="toolbar">
-        <select id="logFilter">
-          <option value="all">All activity</option>
-          <option value="visit">Visits</option>
-          <option value="upload">Uploads</option>
-          <option value="download">Downloads</option>
-          <option value="delete">Deletions</option>
-          <option value="restore">Restores</option>
-          <option value="purge">Purges</option>
-          <option value="admin_login">Admin logins</option>
-          <option value="chat_join">Chat joins</option>
-          <option value="chat_msg">Chat messages</option>
-        </select>
-        <span class="spacer"></span>
-        <span class="small muted" id="logCount"></span>
-        <button class="btn small danger" id="btnClearLogs">Clear all logs</button>
+    <!-- ============ OVERVIEW ============ -->
+    <div class="apane" id="apane-overview">
+      <div class="stats" id="stats"></div>
+
+      <div class="split-grid">
+        <!-- cloud backup -->
+        <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">☁️</span> Cloud backup <span class="spacer"></span><button class="btn small ghost" id="btnCloudRefresh">↻</button></div>
+          <div id="cloudBox" class="pane-list">Loading…</div>
+        </div>
+
+        <!-- chat overview -->
+        <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">💬</span> Chat <span class="spacer"></span><a class="btn small" href="/privateadmin">Open →</a></div>
+          <div id="chatBox" class="pane-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ ACTIVITY ============ -->
+    <div class="apane hidden" id="apane-logs">
+      <div class="items-toolbar">
+        <div class="search-box">
+          <span class="search-ic">🔍</span>
+          <input type="text" id="logSearch" placeholder="Search IP, action, detail…" autocomplete="off">
+        </div>
+        <div class="chips" id="logChips">
+          <button class="chip active" data-cat="all">All</button>
+          <button class="chip" data-cat="visits">Visits</button>
+          <button class="chip" data-cat="uploads">Uploads</button>
+          <button class="chip" data-cat="downloads">Downloads</button>
+          <button class="chip" data-cat="chat">Chat</button>
+          <button class="chip" data-cat="admin">Admin</button>
+          <button class="chip" data-cat="deletions">Deletions</button>
+        </div>
+        <span class="count" id="logCount"></span>
+        <button class="btn small danger" id="btnClearLogs">Clear all</button>
       </div>
       <div class="card tablewrap">
         <table class="logtable">
-          <thead><tr><th>Time</th><th>Action</th><th>IP address</th><th>Detail</th><th>User agent</th></tr></thead>
+          <thead><tr><th>Time</th><th>Action</th><th>IP</th><th>Detail</th><th>User agent</th></tr></thead>
           <tbody id="logBody"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- all items -->
+    <!-- ============ ITEMS ============ -->
     <div class="apane hidden" id="apane-items">
       <div class="card tablewrap">
         <table class="logtable">
@@ -87,26 +106,37 @@
       </div>
     </div>
 
-    <!-- recycle bin -->
+    <!-- ============ RECYCLE ============ -->
     <div class="apane hidden" id="apane-trash">
       <div class="grid" id="trashGrid"></div>
     </div>
 
-    <!-- settings -->
+    <!-- ============ SETTINGS ============ -->
     <div class="apane hidden" id="apane-settings">
-      <div class="card" style="max-width:480px;padding:26px">
-        <h3 style="margin-bottom:6px;font-size:1.05rem">Change admin password</h3>
-        <p class="small muted" style="margin-bottom:16px">All admin sessions are logged out after changing it.</p>
-        <div class="field">
-          <label class="fl">New password</label>
-          <input type="password" id="newPw" placeholder="At least 6 characters" autocomplete="new-password">
+      <div class="split-grid">
+        <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">🔑</span> Admin password</div>
+          <div class="field">
+            <label class="fl">New password</label>
+            <input type="password" id="newPw" placeholder="At least 6 characters" autocomplete="new-password">
+          </div>
+          <button class="btn primary" id="btnChangePw">Update password</button>
+          <p class="small muted mt">All admin sessions are logged out after changing it.</p>
         </div>
-        <button class="btn primary" id="btnChangePw">Update password</button>
+        <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">🛡️</span> Private-admin password</div>
+          <div class="field">
+            <label class="fl">New private-admin password</label>
+            <input type="password" id="newPrivateAdminPw" placeholder="At least 4 characters" autocomplete="new-password">
+          </div>
+          <button class="btn primary" id="btnChangePrivateAdminPw">Update password</button>
+          <p class="small muted mt">Used for the hidden <code>/privateadmin</code> chat moderation panel.</p>
+        </div>
       </div>
     </div>
   </div>
 
   <div class="toasts" id="toasts"></div>
-  <script src="/static/admin.js?v=3"></script>
+  <script src="/static/admin.js?v=5"></script>
 </body>
 </html>

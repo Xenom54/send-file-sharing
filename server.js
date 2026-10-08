@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 const ADMIN_PASSWORD_DEFAULT = 'admin123';
-const PRIVATE_ADMIN_PASSWORD = process.env.PRIVATE_ADMIN_PASSWORD || 'kalios';
+const PRIVATE_ADMIN_PASSWORD_DEFAULT = 'kalios';
 const MAX_FILE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB
 
 [DATA_DIR, UPLOAD_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
@@ -25,6 +25,8 @@ const paths = {
   logs: path.join(DATA_DIR, 'logs.json'),
   chats: path.join(DATA_DIR, 'chats.json'),
   owners: path.join(DATA_DIR, 'owners.json'),
+  visitors: path.join(DATA_DIR, 'visitors.json'),
+  privateadmin: path.join(DATA_DIR, 'privateadmin.json'),
   admin: path.join(DATA_DIR, 'admin.json'),
   sessions: path.join(DATA_DIR, 'sessions.json'),
 };
@@ -45,13 +47,27 @@ const items = readJSON(paths.items, []);
 const logs = readJSON(paths.logs, []);
 const chats = readJSON(paths.chats, {});
 const roomOwners = readJSON(paths.owners, {});
+const chatVisitors = readJSON(paths.visitors, {});
 if (!Array.isArray(items)) items.length = 0;
 if (!roomOwners || typeof roomOwners !== 'object' || Array.isArray(roomOwners)) for (const k of Object.keys(roomOwners)) delete roomOwners[k];
+if (!chatVisitors || typeof chatVisitors !== 'object' || Array.isArray(chatVisitors)) for (const k of Object.keys(chatVisitors)) delete chatVisitors[k];
+
+/* private-admin password: env forces it, otherwise the stored one, else default */
+let PRIVATE_ADMIN_PASSWORD = process.env.PRIVATE_ADMIN_PASSWORD
+  || (readJSON(paths.privateadmin, null) || {}).password
+  || PRIVATE_ADMIN_PASSWORD_DEFAULT;
+function setPrivateAdminPassword(pw) {
+  PRIVATE_ADMIN_PASSWORD = pw;
+  writeJSON(paths.privateadmin, { password: pw });
+  backupPush('data', 'privateadmin.json');
+  megaPush('data', 'privateadmin.json');
+}
 
 function saveItems() { writeJSON(paths.items, items); backupPush('data', 'items.json'); megaPush('data', 'items.json'); }
 function saveLogs() { writeJSON(paths.logs, logs); backupPush('data', 'logs.json'); megaPush('data', 'logs.json'); }
 function saveChats() { writeJSON(paths.chats, chats); backupPush('data', 'chats.json'); megaPush('data', 'chats.json'); }
 function saveOwners() { writeJSON(paths.owners, roomOwners); backupPush('data', 'owners.json'); megaPush('data', 'owners.json'); }
+function saveVisitors() { writeJSON(paths.visitors, chatVisitors); backupPush('data', 'visitors.json'); megaPush('data', 'visitors.json'); }
 
 /* --- GitHub backup (backup-only, fire-and-forget, debounced) --- */
 function backupName(prefix, name) { return `${prefix}/${name}`; }
@@ -411,6 +427,14 @@ app.post('/api/admin/password', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
+  let totalMessages = 0, lastActivity = 0;
+  for (const list of Object.values(chats)) {
+    totalMessages += list.length;
+    if (list.length) { const ts = list[list.length - 1].ts; if (ts > lastActivity) lastActivity = ts; }
+  }
+  const onlineNow = Object.values(presence).reduce((n, m) => n + m.size, 0);
+  const uniqueVisitors = new Set();
+  for (const list of Object.values(chatVisitors)) for (const v of list) uniqueVisitors.add(v.uid || v.name);
   res.json({
     items: items.length,
     active: items.filter(i => !i.deleted).length,
@@ -419,7 +443,28 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
     uploads: logs.filter(l => l.action === 'upload').length,
     storageBytes: items.filter(i => !i.deleted && i.size).reduce((s, i) => s + i.size, 0),
     rooms: Object.keys(chats).length,
+    chatMessages: totalMessages,
+    onlineNow,
+    chatVisitors: uniqueVisitors.size,
+    lastActivity,
+    lastVisit: logs.length ? logs[0].ts : 0,
   });
+});
+
+/* cloud backup status for the admin dashboard */
+app.get('/api/admin/cloud', requireAdmin, async (req, res) => {
+  const out = { mega: { configured: mega.configured() }, github: backup.info() };
+  if (mega.configured()) out.mega = await mega.info();
+  res.json(out);
+});
+
+/* change the private-admin password from the admin panel */
+app.post('/api/admin/privateadmin-password', requireAdmin, (req, res) => {
+  const pw = String(req.body?.password || '');
+  if (pw.length < 4) return res.status(400).json({ error: 'too short (min 4)' });
+  setPrivateAdminPassword(pw);
+  log('privateadmin_pw_change', 'private-admin password changed', req);
+  res.json({ ok: true });
 });
 
 /* ---------------------------- private chat (io) --------------------------- */
@@ -479,12 +524,50 @@ app.get('/api/chat/rooms', (req, res) => {
 /* private admin login check (for the hidden /privateadmin page) */
 app.post('/api/privateadmin/login', (req, res) => {
   const pw = String(req.body?.pw || req.body?.password || '');
-  if (!pw || pw !== PRIVATE_ADMIN_PASSWORD) {
+  if (!pw || !requirePrivateAdminPw(pw)) {
     log('privateadmin_login', 'failed', req);
     return res.status(401).json({ error: 'wrong password' });
   }
   log('privateadmin_login', 'success', req);
   res.json({ ok: true });
+});
+
+/* private admin: dashboard stats (rooms, members, online, public chat) */
+app.get('/api/chat/stats', (req, res) => {
+  if (!requirePrivateAdminPw(req.query.pw)) return res.status(401).json({ error: 'unauthorized' });
+  const rooms = Object.keys(chats).map(name => {
+    const list = chats[name] || [];
+    return {
+      name,
+      messages: list.length,
+      online: (presence[name] || new Map()).size,
+      visitors: (chatVisitors[name] || []).length,
+      lastMsgTs: list.length ? list[list.length - 1].ts : 0,
+      isPublic: name === 'public',
+    };
+  });
+  const onlineNow = Object.values(presence).reduce((n, m) => n + m.size, 0);
+  const unique = new Set();
+  for (const list of Object.values(chatVisitors)) for (const v of list) unique.add(v.uid || v.name);
+  res.json({
+    rooms,
+    onlineNow,
+    totalMessages: rooms.reduce((s, r) => s + r.messages, 0),
+    publicMessages: (chats['public'] || []).length,
+    uniqueVisitors: unique.size,
+  });
+});
+
+/* private admin: who is online + everyone who ever entered a room */
+app.get('/api/chat/rooms/:room/visitors', (req, res) => {
+  if (!requirePrivateAdminPw(req.query.pw)) return res.status(401).json({ error: 'unauthorized' });
+  const room = roomName(req.params.room);
+  if (!room) return res.status(400).json({ error: 'invalid room' });
+  res.json({
+    room,
+    online: roomPresence(room),
+    visitors: (chatVisitors[room] || []).slice().reverse(), // newest first
+  });
 });
 
 /* create a room as its owner (returns a one-time owner token) */
@@ -508,7 +591,8 @@ app.delete('/api/chat/rooms/:room', (req, res) => {
   if (!room) return res.status(400).json({ error: 'invalid room' });
   if (room === 'public') return res.status(403).json({ error: 'the public chat cannot be deleted' });
   delete chats[room];
-  saveChats();
+  delete chatVisitors[room];
+  saveChats(); saveVisitors();
   io.to(room).emit('system', { ts: Date.now(), text: 'this room was deleted by an admin', kind: 'delete' });
   log('chat_delete', `room=${room}`, req);
   res.json({ ok: true });
@@ -522,23 +606,70 @@ app.delete('/api/chat/rooms/:room/mine', (req, res) => {
   if (roomOwners[room] !== token) return res.status(401).json({ error: 'only the room creator can delete this room' });
   delete chats[room];
   delete roomOwners[room];
-  saveChats(); saveOwners();
+  delete chatVisitors[room];
+  saveChats(); saveOwners(); saveVisitors();
   io.to(room).emit('system', { ts: Date.now(), text: 'this room was deleted by its creator', kind: 'delete' });
   log('chat_delete', `room=${room} (creator)`, req);
   res.json({ ok: true });
 });
 
+/* ------------------------- chat presence + visitors ------------------------ */
+/* who is online right now: room -> Map(socketId -> {name, uid, admin, since}) */
+const presence = {};
+function roomPresence(room) {
+  const list = [];
+  for (const [, u] of presence[room] || []) list.push({ name: u.name, admin: !!u.admin, since: u.since });
+  return list;
+}
+/* push the online list to every private-admin socket in the room */
+function emitPresenceToAdmins(room) {
+  if (!room) return;
+  const ids = io.sockets.adapter.rooms.get(room);
+  if (!ids) return;
+  const list = roomPresence(room);
+  for (const id of ids) {
+    const s = io.sockets.sockets.get(id);
+    if (s && s.data && s.data.admin) s.emit('presence', { room, online: list });
+  }
+}
+function recordVisit(room, name, uid, isAdmin, ip) {
+  if (!chatVisitors[room]) chatVisitors[room] = [];
+  const list = chatVisitors[room];
+  const last = list[list.length - 1];
+  if (!last || last.uid !== uid || last.name !== name) {
+    list.push({ name, uid, ip, ts: Date.now(), admin: !!isAdmin });
+    if (list.length > 300) chatVisitors[room] = list.slice(-300);
+    saveVisitors();
+  }
+}
+function requirePrivateAdminPw(pw) { return String(pw || '') === PRIVATE_ADMIN_PASSWORD && !!PRIVATE_ADMIN_PASSWORD; }
+
 io.on('connection', (socket) => {
   let room = null, name = 'anonymous', isPrivateAdmin = false;
 
   socket.on('join', ({ room: r, name: n, pw, uid: u }, ack) => {
+    // leave any previous room first (so switching rooms doesn't double-connect)
+    if (socket.data.room && socket.data.room !== room) {
+      const old = socket.data.room;
+      socket.leave(old);
+      if (presence[old]) presence[old].delete(socket.id);
+      emitPresenceToAdmins(old);
+    }
     room = roomName(r);
     name = String(n || 'anonymous').slice(0, 30);
     const uid = String(u || '').slice(0, 64);
-    isPrivateAdmin = String(pw || '') === PRIVATE_ADMIN_PASSWORD && !!PRIVATE_ADMIN_PASSWORD;
+    isPrivateAdmin = requirePrivateAdminPw(pw);
     if (!room) { socket.emit('system', { ts: Date.now(), text: 'invalid room' }); return; }
     socket.join(room);
     socket.data.room = room; socket.data.name = name; socket.data.uid = uid; socket.data.admin = isPrivateAdmin;
+
+    // presence + visitor history
+    if (!presence[room]) presence[room] = new Map();
+    presence[room].set(socket.id, { name, uid, admin: isPrivateAdmin, since: Date.now() });
+    recordVisit(room, name, uid, isPrivateAdmin, socket.handshake.address);
+    emitPresenceToAdmins(room);
+    if (isPrivateAdmin) socket.emit('presence', { room, online: roomPresence(room) });
+
     socket.emit('history', chatHistory(room));
     socket.emit('role', { admin: isPrivateAdmin, owner: !!roomOwners[room] });
     io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
@@ -578,7 +709,11 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    if (room) io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
+    if (room) {
+      if (presence[room]) presence[room].delete(socket.id);
+      emitPresenceToAdmins(room);
+      io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
+    }
   });
 });
 
@@ -588,6 +723,8 @@ const RESTORE_DATA_FILES = [
   ['logs.json', paths.logs],
   ['chats.json', paths.chats],
   ['owners.json', paths.owners],
+  ['visitors.json', paths.visitors],
+  ['privateadmin.json', paths.privateadmin],
 ];
 
 /* MEGA first (full fidelity), GitHub fills any still-missing files */
@@ -601,7 +738,7 @@ async function megaRestoreData() {
       if (buf) { fs.writeFileSync(target, buf); restored++; }
     } catch (e) { console.error('[mega] restore', name, e.message); }
   }
-  console.log(`[mega] restored ${restored}/4 data files`);
+  console.log(`[mega] restored ${restored}/6 data files`);
   return restored;
 }
 
@@ -615,7 +752,7 @@ async function backupRestoreData() {
       if (f && f.content) { fs.writeFileSync(target, Buffer.from(f.content, 'base64')); restored++; }
     } catch (e) { console.error('[backup] restore', name, e.message); }
   }
-  console.log(`[backup] restored ${restored}/4 data files`);
+  console.log(`[backup] restored ${restored}/6 data files`);
   return restored;
 }
 
@@ -677,6 +814,13 @@ async function backupRestoreUploads() {
       Object.assign(chats, readJSON(paths.chats, {}));
       for (const k of Object.keys(roomOwners)) delete roomOwners[k];
       Object.assign(roomOwners, readJSON(paths.owners, {}));
+      for (const k of Object.keys(chatVisitors)) delete chatVisitors[k];
+      Object.assign(chatVisitors, readJSON(paths.visitors, {}));
+      // re-read the restored private-admin password (unless env forces it)
+      if (!process.env.PRIVATE_ADMIN_PASSWORD) {
+        const storedPac = readJSON(paths.privateadmin, null);
+        if (storedPac && storedPac.password) PRIVATE_ADMIN_PASSWORD = storedPac.password;
+      }
       // restore uploaded files in the background: MEGA first, GitHub after
       megaRestoreUploads().then(() => backupRestoreUploads()).catch(() => {});
     }

@@ -50,6 +50,12 @@
         </button>
         <div class="room-list" id="roomList" style="margin-top:8px"></div>
         <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ New private room</button>
+
+        <!-- members panel: private admin only -->
+        <div id="membersPanel" class="hidden" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+          <div class="ph">👥 Online now <span class="pill ok" id="membersCount">0</span></div>
+          <div class="member-list" id="membersList"></div>
+        </div>
       </div>
       <div class="card chat-main">
         <div class="chat-header">
@@ -59,6 +65,7 @@
           <span class="right">
             <button class="btn small danger" id="btnDeleteRoom" title="Delete this room">🗑 Delete room</button>
             <button class="btn small" id="btnShare" title="Share room link">🔗 Share</button>
+            <button class="btn small ghost" id="btnAdminUnlock" title="Admin mode">🛡️</button>
             <button class="btn small ghost" id="btnLeave">Leave</button>
           </span>
         </div>
@@ -74,8 +81,23 @@
     </div>
   </div>
 
+  <!-- admin unlock modal -->
+  <div class="lightbox" id="adminModal">
+    <div class="card" style="max-width:400px;width:calc(100% - 32px);padding:26px;text-align:center">
+      <div class="lock-ic" style="margin-bottom:14px">🛡️</div>
+      <h3 style="font-size:1.1rem;font-weight:800">Admin mode</h3>
+      <p class="small muted" style="margin:8px 0 16px;line-height:1.5">Enter the private-admin password to see who's online in this room and unlock moderation tools.</p>
+      <input type="password" id="adminPwInput" placeholder="Private-admin password" autocomplete="off" style="text-align:left">
+      <div class="small" id="adminPwError" style="color:var(--danger);margin-top:8px;min-height:16px;font-weight:600"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn" id="adminCancel" style="flex:1">Cancel</button>
+        <button class="btn primary" id="adminConfirm" style="flex:1">Unlock</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/private.js?v=3"></script>
+  <script src="/static/private.js?v=5"></script>
 </body>
 </html>

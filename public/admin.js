@@ -1,9 +1,10 @@
 /* ============================== SEND · admin panel ============================== */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' }[c]));
 const fmtSize = b => b == null ? '—' : (b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : b < 1073741824 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1073741824).toFixed(2) + ' GB');
-const fmtTime = ts => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtTime = ts => ts ? new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+const ago = ts => { if (!ts) return '—'; const s = (Date.now() - ts) / 1000; if (s < 60) return Math.floor(s) + 's ago'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; };
 
 function toast(msg, kind = 'ok') {
   const t = document.createElement('div');
@@ -26,57 +27,151 @@ $('#btnLogin').addEventListener('click', async () => {
     if (r.ok) { toast('✓ Welcome, admin'); enterDash(); }
     else {
       const d = await r.json().catch(() => ({}));
-      if (r.status === 429) toast('⚠ ' + (d.error || 'Too many attempts'), 'err');
-      else toast('⚠ ' + (d.error || 'Wrong password'), 'err');
+      toast('⚠ ' + (r.status === 429 ? (d.error || 'Too many attempts') : (d.error || 'Wrong password')), 'err');
       $('#loginPw').value = '';
     }
   } catch { toast('⚠ Login failed', 'err'); }
   btn.disabled = false; btn.textContent = 'Log in →';
 });
 $('#loginPw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnLogin').click(); });
+$('#btnLogout').addEventListener('click', async () => { await fetch('/api/admin/logout', { method: 'POST' }); location.reload(); });
 
-$('#btnLogout').addEventListener('click', async () => {
-  await fetch('/api/admin/logout', { method: 'POST' });
-  location.reload();
-});
-
-/* ------------------------------ enter dash ------------------------------- */
 async function enterDash() {
   $('#loginCard').classList.add('hidden');
   $('#dash').classList.remove('hidden');
-  loadStats(); loadLogs(); loadAll(); loadTrash();
+  loadOverview(); loadLogs(); loadAll(); loadTrash();
 }
 
-/* -------------------------------- stats ---------------------------------- */
+/* ------------------------------- OVERVIEW -------------------------------- */
+async function loadOverview() {
+  loadStats(); loadCloud(); loadChatBox();
+}
+$('#btnCloudRefresh').addEventListener('click', loadCloud);
+
 async function loadStats() {
   try {
     const s = await (await fetch('/api/admin/stats')).json();
     const cards = [
-      ['Active items', s.active, '📦'], ['Deleted items', s.deleted, '🗑️'],
-      ['Total visits', s.visits, '👁️'], ['Uploads', s.uploads, '⬆️'],
-      ['Chat rooms', s.rooms, '💬'], ['Storage used', fmtSize(s.storageBytes), '💾'],
+      ['Active items', s.active, '📦'], ['Recycle bin', s.deleted, '🗑️'],
+      ['Visits logged', s.visits, '👁️'], ['Uploads', s.uploads, '⬆️'],
+      ['Chat rooms', s.rooms, '💬'], ['Online now', s.onlineNow, '🟢'],
+      ['Chat messages', s.chatMessages, '✉️'], ['Chat visitors', s.chatVisitors, '👥'],
+      ['Storage used', fmtSize(s.storageBytes), '💾'], ['Last activity', ago(s.lastActivity), '🕒'],
     ];
     $('#stats').innerHTML = cards.map(([k, v, ic]) =>
       `<div class="card stat hoverable"><span class="ic">${ic}</span><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join('');
   } catch { /* ignore */ }
 }
 
-/* --------------------------------- logs ---------------------------------- */
-async function loadLogs() {
-  const f = $('#logFilter').value;
+async function loadCloud() {
+  const box = $('#cloudBox');
+  box.innerHTML = '<div class="pane-row muted">Checking…</div>';
   try {
-    const rows = await (await fetch('/api/admin/logs?filter=' + encodeURIComponent(f))).json();
-    $('#logCount').textContent = rows.length + (rows.length === 500 ? '+ entries (newest first)' : ' entries (newest first)');
-    $('#logBody').innerHTML = rows.length ? rows.map(l => `<tr>
-      <td class="nowrap">${esc(fmtTime(l.ts))}</td>
-      <td><span class="act ${esc(l.action)}">${esc(l.action.replace(/_/g, ' '))}</span></td>
-      <td class="ip">${esc(l.ip)}</td>
-      <td class="det">${esc(l.detail)}</td>
-      <td class="ua">${esc(l.ua)}</td>
-    </tr>`).join('') : `<tr><td colspan="5" class="muted" style="text-align:center;padding:34px">No log entries yet.</td></tr>`;
+    const c = await (await fetch('/api/admin/cloud')).json();
+    let html = '';
+
+    // MEGA (primary)
+    if (c.mega.configured) {
+      html += `
+      <div class="pane-row">
+        <div>
+          <div class="pr-title">🟣 MEGA <span class="pill ${c.mega.connected ? 'ok' : 'bad'}">${c.mega.connected ? 'connected' : 'offline'}</span></div>
+          <div class="small muted">${esc(c.mega.folder || '')} · ${c.mega.dataFiles ?? '?'} data files · ${c.mega.uploadFiles ?? '?'} uploads</div>
+          ${c.mega.spaceUsedMB != null ? `<div class="small muted">${esc(c.mega.spaceUsedMB)} MB used of ${esc(c.mega.spaceTotalGB)} GB</div>` : ''}
+          ${c.mega.lastError
+            ? `<div class="small" style="color:var(--danger)">last error: ${esc(String(c.mega.lastError).slice(0, 80))}</div>`
+            : `<div class="small muted">last push ${esc(ago(c.mega.lastPushAt))} · ${c.mega.pushCount} pushes</div>`}
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="pane-row"><div class="pr-title">🟣 MEGA <span class="pill">not configured</span></div></div>`;
+    }
+
+    // GitHub (secondary)
+    if (c.github.configured) {
+      html += `
+      <div class="pane-row">
+        <div>
+          <div class="pr-title">🐙 GitHub <span class="pill ok">active</span></div>
+          <div class="small muted">${esc(c.github.repo)}</div>
+          ${c.github.lastError
+            ? `<div class="small" style="color:var(--danger)">last error: ${esc(String(c.github.lastError).slice(0, 80))}</div>`
+            : `<div class="small muted">last push ${esc(ago(c.github.lastPushAt))} · ${c.github.pushCount} pushes</div>`}
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="pane-row"><div class="pr-title">🐙 GitHub <span class="pill">not configured</span></div></div>`;
+    }
+    box.innerHTML = html;
+  } catch { box.innerHTML = '<div class="pane-row muted">Failed to load cloud status.</div>'; }
+}
+
+async function loadChatBox() {
+  try {
+    const s = await (await fetch('/api/admin/stats')).json();
+    $('#chatBox').innerHTML = `
+      <div class="pane-row"><div class="pr-title">🟢 Online now</div><div class="pr-val">${s.onlineNow}</div></div>
+      <div class="pane-row"><div class="pr-title">💬 Rooms</div><div class="pr-val">${s.rooms}</div></div>
+      <div class="pane-row"><div class="pr-title">✉️ Messages</div><div class="pr-val">${s.chatMessages}</div></div>
+      <div class="pane-row"><div class="pr-title">👥 Unique visitors</div><div class="pr-val">${s.chatVisitors}</div></div>
+      <div class="pane-row"><div class="pr-title">🕒 Last activity</div><div class="pr-val small">${esc(fmtTime(s.lastActivity))}</div></div>`;
+  } catch { /* ignore */ }
+}
+
+/* ------------------------------- ACTIVITY --------------------------------- */
+let allLogs = [];
+let logCategory = 'all';
+let logQuery = '';
+
+const LOG_CATEGORIES = {
+  visits: ['visit'],
+  uploads: ['upload', 'chat_image'],
+  downloads: ['download'],
+  chat: ['chat_join', 'chat_admin_join', 'chat_msg', 'chat_msg_del', 'chat_create', 'chat_delete', 'backup_restore'],
+  admin: ['admin_login', 'privateadmin_login', 'privateadmin_pw_change'],
+  deletions: ['delete', 'purge', 'clear_logs'],
+};
+
+async function loadLogs() {
+  try {
+    allLogs = await (await fetch('/api/admin/logs?filter=all')).json();
+    renderLogs();
   } catch { toast('⚠ Failed to load logs', 'err'); }
 }
-$('#logFilter').addEventListener('change', loadLogs);
+
+function renderLogs() {
+  let list = allLogs;
+  if (logCategory !== 'all') {
+    const acts = LOG_CATEGORIES[logCategory] || [];
+    list = list.filter(l => acts.includes(l.action));
+  }
+  if (logQuery) {
+    const q = logQuery.toLowerCase();
+    list = list.filter(l =>
+      String(l.ip || '').toLowerCase().includes(q) ||
+      String(l.action || '').toLowerCase().includes(q) ||
+      String(l.detail || '').toLowerCase().includes(q) ||
+      String(l.ua || '').toLowerCase().includes(q)
+    );
+  }
+  $('#logCount').textContent = `${list.length}${list.length !== allLogs.length ? ' of ' + allLogs.length : ''} entries`;
+  $('#logBody').innerHTML = list.length ? list.map(l => `<tr>
+    <td class="nowrap">${esc(fmtTime(l.ts))}</td>
+    <td><span class="act ${esc(l.action)}">${esc(l.action.replace(/_/g, ' '))}</span></td>
+    <td class="ip">${esc(l.ip)}</td>
+    <td class="det">${esc(l.detail)}</td>
+    <td class="ua" title="${esc(l.ua)}">${esc(String(l.ua || '').slice(0, 60))}</td>
+  </tr>`).join('') : `<tr><td colspan="5" class="muted" style="text-align:center;padding:34px">No matching entries.</td></tr>`;
+}
+
+$('#logSearch').addEventListener('input', () => { logQuery = $('#logSearch').value.trim().toLowerCase(); renderLogs(); });
+$('#logChips').addEventListener('click', e => {
+  const chip = e.target.closest('[data-cat]');
+  if (!chip) return;
+  logCategory = chip.dataset.cat;
+  $$('#logChips .chip').forEach(c => c.classList.toggle('active', c === chip));
+  renderLogs();
+});
 
 $('#btnClearLogs').addEventListener('click', async () => {
   if (!confirm('Delete ALL logs permanently?')) return;
@@ -84,7 +179,7 @@ $('#btnClearLogs').addEventListener('click', async () => {
   toast('✓ Logs cleared'); loadLogs(); loadStats();
 });
 
-/* ------------------------------ all items -------------------------------- */
+/* --------------------------------- ITEMS ---------------------------------- */
 async function loadAll() {
   try {
     const rows = await (await fetch('/api/admin/items/all')).json();
@@ -100,7 +195,7 @@ async function loadAll() {
   } catch { toast('⚠ Failed to load items', 'err'); }
 }
 
-/* ----------------------------- recycle bin ------------------------------- */
+/* ------------------------------ RECYCLE BIN ------------------------------- */
 async function loadTrash() {
   try {
     const rows = await (await fetch('/api/admin/items/deleted')).json();
@@ -118,7 +213,7 @@ async function loadTrash() {
         : it.fileName ? `<div class="file-chip"><span class="ic">📄</span><div><div class="nm">${esc(it.originalName)}</div><div class="sz">${fmtSize(it.size)}</div></div></div>`
         : '';
       return `<div class="card item hoverable" style="animation-delay:${Math.min(i * 45, 300)}ms">
-        <div class="meta"><span class="badge ${it.type}">${it.type}</span><span>deleted ${esc(fmtTime(it.deletedAt))}</span><span>· from ${esc(it.ip || '—')}</span></div>
+        <div class="meta"><span class="badge ${it.type}">${it.type}</span><span>deleted ${esc(ago(it.deletedAt))}</span><span>· from ${esc(it.ip || '—')}</span></div>
         ${it.title ? `<h3>${esc(it.title)}</h3>` : ''}
         ${body}
         <div class="item-actions">
@@ -143,7 +238,7 @@ $('#trashGrid').addEventListener('click', async e => {
   }
 });
 
-/* -------------------------------- settings ------------------------------- */
+/* -------------------------------- SETTINGS -------------------------------- */
 $('#btnChangePw').addEventListener('click', async () => {
   const pw = $('#newPw').value;
   if (pw.length < 6) return toast('⚠ Password too short (min 6)', 'err');
@@ -154,13 +249,30 @@ $('#btnChangePw').addEventListener('click', async () => {
   else toast('⚠ Failed to change password', 'err');
 });
 
-/* --------------------------------- tabs ---------------------------------- */
+$('#btnChangePrivateAdminPw').addEventListener('click', async () => {
+  const pw = $('#newPrivateAdminPw').value;
+  if (pw.length < 4) return toast('⚠ Password too short (min 4)', 'err');
+  const r = await fetch('/api/admin/privateadmin-password', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }),
+  });
+  if (r.ok) { toast('✓ Private-admin password updated'); $('#newPrivateAdminPw').value = ''; }
+  else {
+    const d = await r.json().catch(() => ({}));
+    toast('⚠ ' + (d.error || 'Failed to change password'), 'err');
+  }
+});
+
+/* --------------------------------- TABS ---------------------------------- */
 $$('#adminTabs .tab').forEach(t => t.addEventListener('click', () => {
   $$('#adminTabs .tab').forEach(x => x.classList.toggle('active', x === t));
   $$('.apane').forEach(p => p.classList.toggle('hidden', p.id !== 'apane-' + t.dataset.atab));
+  if (t.dataset.atab === 'overview') loadOverview();
+  if (t.dataset.atab === 'logs') loadLogs();
+  if (t.dataset.atab === 'items') loadAll();
+  if (t.dataset.atab === 'trash') loadTrash();
 }));
 
-/* --------------------------------- boot ---------------------------------- */
+/* --------------------------------- BOOT ---------------------------------- */
 (async () => {
   try {
     const d = await (await fetch('/api/admin/status')).json();

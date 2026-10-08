@@ -439,6 +439,44 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .toolbar select { width: auto; min-width: 180px; }
 .toolbar .spacer { flex: 1; }
 
+/* ------- overview panes (admin/privateadmin dashboards) ------- */
+.split-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 4px; }
+.pane-card { padding: 18px; }
+.pane-head { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 1rem; margin-bottom: 14px; }
+.pane-head .pane-ic { font-size: 1.1rem; }
+.pane-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+.pane-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: var(--r-sm); background: rgba(3, 4, 10, .5); border: 1px solid var(--border); }
+.pane-row:hover { border-color: var(--border-2); }
+.pr-title { font-weight: 650; font-size: .92rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pr-val { font-family: var(--mono); font-weight: 700; font-size: 1.05rem; color: #93a4ff; white-space: nowrap; }
+
+.pill {
+  display: inline-block; padding: 2px 9px; border-radius: 99px;
+  font-size: .68rem; font-weight: 800; letter-spacing: .03em;
+  background: rgba(165, 171, 208, .14); color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.pill.ok { background: rgba(52, 211, 153, .14); color: #6ee7b7; border-color: rgba(52, 211, 153, .35); }
+.pill.bad { background: rgba(251, 113, 133, .14); color: #fda4af; border-color: rgba(251, 113, 133, .35); }
+
+/* ------------------------- member lists (admin) ------------------------- */
+.member-block { display: flex; flex-direction: column; gap: 6px; }
+.mb-title { font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.member-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+.member-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: rgba(3, 4, 10, .5); border: 1px solid var(--border); border-radius: 9px;
+  font-size: .87rem; font-weight: 600;
+}
+.member-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; }
+.member-row .dot.on { background: var(--success); box-shadow: 0 0 8px rgba(52, 211, 153, .7); }
+.mr-ago { margin-left: auto; font-size: .7rem; color: var(--text-3); font-weight: 500; white-space: nowrap; }
+
+/* ------------------------------ responsive ------------------------------ */
+@media (max-width: 900px) {
+  .split-grid { grid-template-columns: 1fr; }
+}
+
 /* --------------------------------- chat ---------------------------------- */
 .chat-app { display: grid; grid-template-columns: 300px 1fr; gap: 18px; height: 72vh; min-height: 520px; }
 .panel { padding: 18px; display: flex; flex-direction: column; }

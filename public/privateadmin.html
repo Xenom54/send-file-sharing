@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Private Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-inner">
       <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
       <div class="nav-links">
-        <a href="/">← Home</a>
+        <a href="/">Site</a>
       </div>
     </div>
   </nav>
@@ -22,7 +22,7 @@
   <div class="card admin-login" id="loginCard">
     <div class="lock-ic">🛡️</div>
     <h2>Private admin</h2>
-    <div class="sub">Moderate every private chat room — read, delete messages and delete rooms.</div>
+    <div class="sub">Moderate every chat room — read, delete messages, delete rooms, see members.</div>
     <div class="field">
       <label class="fl">Password</label>
       <input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password">
@@ -35,39 +35,64 @@
     <div class="hero">
       <div style="flex:1">
         <h1>Private chat admin</h1>
-        <p>All rooms, message counts, and moderation tools.</p>
+        <p id="statsSub">All rooms, members and moderation tools.</p>
       </div>
-      <button class="btn small" id="btnLogout">Log out</button>
+      <button class="btn small" id="btnRefresh">↻ Refresh</button>
+      <button class="btn small ghost" id="btnLogout">Log out</button>
     </div>
 
-    <div class="toolbar">
-      <span class="small muted" id="roomCount"></span>
-      <span class="spacer"></span>
-      <button class="btn small" id="btnRefresh">↻ Refresh</button>
+    <div class="stats" id="stats"></div>
+
+    <div class="items-head">
+      <h2>Rooms</h2>
+      <span class="count" id="roomCount"></span>
     </div>
     <div class="grid" id="roomsGrid"></div>
   </div>
 
   <!-- room viewer -->
   <div class="wrap hidden" id="roomView">
-    <div class="hero" style="align-items:center">
+    <div class="hero" style="align-items:center;gap:14px">
       <button class="btn small" id="btnBack">← Back</button>
       <div style="flex:1;min-width:200px">
-        <h1 id="viewTitle">#room</h1>
+        <h1 id="viewTitle" style="font-size:1.5rem">#room</h1>
+        <p class="small muted"><span id="viewOnline">0 online</span> · <span id="viewMsgs">0 messages</span></p>
       </div>
       <button class="btn small danger" id="btnDeleteRoom">🗑 Delete room</button>
     </div>
-    <div class="card chat-main" style="height:70vh">
-      <div class="messages" id="viewMessages"></div>
-      <div class="chat-input">
-        <input type="text" id="viewInput" placeholder="Send as private admin…" maxlength="4000">
-        <button class="btn primary" id="viewSend">Send</button>
+
+    <div class="chat-app" style="height:64vh;min-height:440px">
+      <!-- members panel (admin only) -->
+      <div class="card panel">
+        <div class="ph">👥 Members (admin only)</div>
+        <div class="member-block">
+          <div class="mb-title">Online now <span class="pill ok" id="onlineCount">0</span></div>
+          <div class="member-list" id="onlineList"></div>
+        </div>
+        <div class="member-block" style="margin-top:14px">
+          <div class="mb-title">Everyone who entered</div>
+          <div class="member-list" id="visitorsList"></div>
+        </div>
+      </div>
+
+      <!-- chat -->
+      <div class="card chat-main">
+        <div class="chat-header">
+          <span style="font-size:1.2rem">💬</span>
+          <span class="room-title" id="roomTitleSmall">#room</span>
+          <span class="right"><span class="badge text">private admin</span></span>
+        </div>
+        <div class="messages" id="viewMessages"></div>
+        <div class="chat-input">
+          <input type="text" id="viewInput" placeholder="Send as private admin…" maxlength="4000">
+          <button class="btn primary" id="viewSend">Send</button>
+        </div>
       </div>
     </div>
   </div>
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/privateadmin.js?v=3"></script>
+  <script src="/static/privateadmin.js?v=5"></script>
 </body>
 </html>
