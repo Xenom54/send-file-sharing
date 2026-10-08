@@ -31,6 +31,21 @@ node server.js
 | `UPLOAD_DIR` | `./uploads` | where uploaded files live |
 | `COOKIE_SECURE` | `0` | set `1` when serving over HTTPS |
 | `PRIVATE_ADMIN_PASSWORD` | `kalios` | password for the hidden /privateadmin chat super-admin |
+| `GITHUB_BACKUP_TOKEN` | — | classic PAT (`repo` scope) enabling the cloud backup |
+| `GITHUB_BACKUP_REPO` | — | private repo for backups, e.g. `user/send-backup` |
+
+## ☁️ Cloud backup (GitHub)
+When `GITHUB_BACKUP_TOKEN` + `GITHUB_BACKUP_REPO` are set, everything is mirrored
+to a **private** GitHub repo in real time:
+- `data/items.json`, `data/logs.json`, `data/chats.json`, `data/owners.json` — pushed on every change (debounced)
+- every uploaded file — pushed right after upload (files > 100 MB are skipped, GitHub's hard limit)
+- purged items are removed from the backup too
+
+The site **never depends** on the backup: local files stay authoritative, and the
+backup is only read in one case — when the instance boots with **empty local data**
+(e.g. after a redeploy on an ephemeral free tier), everything is restored from the
+backup automatically. Deleted rooms are never restorable, and the public chat
+cannot be deleted by anyone, including the private admin.
 
 ## 🚀 Deploy to the internet (so it's not tied to your PC)
 
@@ -74,6 +89,8 @@ and free HTTPS. (The site then *is* still hosted on your PC, but the URL is publ
 ## ✨ Features
 
 ### Main page (`/`)
+- Clean layout: composer first, then a toolbar with **search** + type filter chips
+  (All / Text / Images / Audio / Video / Files)
 - Text notes with titles
 - File upload: drag & drop, click, or **Ctrl+V paste** — up to **20 GB**, multiple at once, live progress
   (uploads this big need a stable connection; the server has no upload timeout)
