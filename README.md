@@ -31,20 +31,30 @@ node server.js
 | `UPLOAD_DIR` | `./uploads` | where uploaded files live |
 | `COOKIE_SECURE` | `0` | set `1` when serving over HTTPS |
 | `PRIVATE_ADMIN_PASSWORD` | `kalios` | password for the hidden /privateadmin chat super-admin |
-| `GITHUB_BACKUP_TOKEN` | — | classic PAT (`repo` scope) enabling the cloud backup |
+| `MEGA_EMAIL` | — | MEGA account email (primary cloud backup) |
+| `MEGA_PASSWORD` | — | MEGA account password (2FA must be off for unattended logins) |
+| `MEGA_FOLDER` | `send-backup` | folder name inside the MEGA drive |
+| `GITHUB_BACKUP_TOKEN` | — | classic PAT (`repo` scope) enabling the secondary GitHub backup |
 | `GITHUB_BACKUP_REPO` | — | private repo for backups, e.g. `user/send-backup` |
 
-## ☁️ Cloud backup (GitHub)
-When `GITHUB_BACKUP_TOKEN` + `GITHUB_BACKUP_REPO` are set, everything is mirrored
-to a **private** GitHub repo in real time:
-- `data/items.json`, `data/logs.json`, `data/chats.json`, `data/owners.json` — pushed on every change (debounced)
-- every uploaded file — pushed right after upload (files > 100 MB are skipped, GitHub's hard limit)
-- purged items are removed from the backup too
+## ☁️ Cloud backup (MEGA primary + GitHub secondary)
+The site **never depends** on the cloud: local files stay authoritative, and the
+backup is only read in one case — when the instance boots with **empty local
+data** (e.g. after a redeploy on an ephemeral free tier), everything is restored
+automatically.
 
-The site **never depends** on the backup: local files stay authoritative, and the
-backup is only read in one case — when the instance boots with **empty local data**
-(e.g. after a redeploy on an ephemeral free tier), everything is restored from the
-backup automatically. Deleted rooms are never restorable, and the public chat
+**MEGA (primary)** — when `MEGA_EMAIL` + `MEGA_PASSWORD` are set, everything is
+mirrored to a `send-backup` folder in the MEGA drive in real time while the
+server runs:
+- `send-backup/data/` — items, **admin logs**, chats, room owners (pushed on every change, debounced)
+- `send-backup/uploads/` — every uploaded file (chat images, recordings, files; streamed, up to 500 MB each)
+- deletions propagate too (purged items are removed from the backup)
+
+**GitHub (secondary)** — when `GITHUB_BACKUP_TOKEN` + `GITHUB_BACKUP_REPO` are
+set, the same data is mirrored to a private repo (files ≤ 100 MB, GitHub's hard
+limit) as an extra safety net.
+
+Restore priority on boot: MEGA first, GitHub fills any gaps. The public chat
 cannot be deleted by anyone, including the private admin.
 
 ## 🚀 Deploy to the internet (so it's not tied to your PC)
