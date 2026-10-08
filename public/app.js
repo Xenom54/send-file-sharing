@@ -111,16 +111,56 @@ function itemHTML(it, i) {
   </div>`;
 }
 
+/* ------------------------------ search + filter ------------------------------ */
+let searchQuery = '';
+let typeFilter = 'all';
+
+$('#searchInput').addEventListener('input', () => {
+  searchQuery = $('#searchInput').value.trim().toLowerCase();
+  render();
+});
+$('#typeChips').addEventListener('click', e => {
+  const chip = e.target.closest('[data-type]');
+  if (!chip) return;
+  typeFilter = chip.dataset.type;
+  $$('#typeChips .chip').forEach(c => c.classList.toggle('active', c === chip));
+  render();
+});
+
+function getFiltered() {
+  let list = items;
+  if (typeFilter !== 'all') list = list.filter(i => i.type === typeFilter);
+  if (searchQuery) {
+    list = list.filter(i =>
+      String(i.title || '').toLowerCase().includes(searchQuery) ||
+      String(i.text || '').toLowerCase().includes(searchQuery) ||
+      String(i.originalName || '').toLowerCase().includes(searchQuery)
+    );
+  }
+  return list;
+}
+
 function render() {
   const host = $('#items');
-  $('#itemCount').textContent = items.length ? items.length + ' items' : '';
+  const filtered = getFiltered();
+  const hasFilters = typeFilter !== 'all' || !!searchQuery;
+  $('#itemCount').textContent = items.length
+    ? (hasFilters ? `${filtered.length} of ${items.length}` : `${items.length}`) + ' items'
+    : '';
+
   if (!items.length) {
     host.innerHTML = `<div class="card empty"><div class="emoji">🗂️</div>
       <div class="t">Nothing uploaded yet</div>
       <div>Send a text note above, drop a file, or record some audio.</div></div>`;
     return;
   }
-  host.innerHTML = items.map(itemHTML).join('');
+  if (!filtered.length) {
+    host.innerHTML = `<div class="card empty"><div class="emoji">🔍</div>
+      <div class="t">No results</div>
+      <div>Nothing matches your search or filter.</div></div>`;
+    return;
+  }
+  host.innerHTML = filtered.map(itemHTML).join('');
 }
 
 $('#items').addEventListener('click', e => {

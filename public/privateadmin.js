@@ -51,15 +51,21 @@ async function loadRooms() {
       $('#roomsGrid').innerHTML = `<div class="card empty"><div class="emoji">💬</div><div class="t">No rooms yet</div><div>Create a room in /private and it will appear here.</div></div>`;
       return;
     }
-    $('#roomsGrid').innerHTML = rooms.map(ro => `
+    $('#roomsGrid').innerHTML = rooms.map(ro => {
+      const isPublic = ro.name === 'public';
+      return `
       <div class="card item hoverable">
-        <div class="meta"><span class="badge file">chat</span><span>${ro.count} messages</span></div>
-        <h3>💬 #${esc(ro.name)}</h3>
+        <div class="meta">
+          <span class="badge ${isPublic ? 'text' : 'file'}">${isPublic ? 'public' : 'chat'}</span>
+          <span>${ro.count} messages</span>
+        </div>
+        <h3>${isPublic ? '🌍' : '💬'} #${esc(ro.name)}</h3>
         <div class="item-actions">
           <button class="btn small primary" data-open="${esc(ro.name)}">Open</button>
-          <button class="btn small danger" data-delroom="${esc(ro.name)}">🗑 Delete</button>
+          ${isPublic ? '' : `<button class="btn small danger" data-delroom="${esc(ro.name)}">🗑 Delete</button>`}
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch { toast('⚠ Failed to load rooms', 'err'); }
 }
 
@@ -80,7 +86,8 @@ async function openRoom(room) {
   currentRoom = room;
   $('#dash').classList.add('hidden');
   $('#roomView').classList.remove('hidden');
-  $('#viewTitle').textContent = '#' + room;
+  $('#viewTitle').textContent = (room === 'public' ? '🌍 #' : '#') + room;
+  $('#btnDeleteRoom').style.display = room === 'public' ? 'none' : '';
   $('#viewMessages').innerHTML = '';
   $('#viewInput').value = '';
   if (!socket.connected) socket.connect();

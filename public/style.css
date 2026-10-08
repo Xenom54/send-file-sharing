@@ -262,9 +262,51 @@ label.fl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: 
 .rec-timer { font-family: var(--mono); font-weight: 600; font-size: 1.1rem; color: #fda4af; min-width: 68px; font-variant-numeric: tabular-nums; }
 
 /* --------------------------------- items --------------------------------- */
-.items-head { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; }
-.items-head h2 { font-size: 1.28rem; font-weight: 800; letter-spacing: -.02em; }
-.items-head .count { color: var(--text-3); font-size: .84rem; font-weight: 600; }
+.items-toolbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.search-box {
+  position: relative; flex: 1; min-width: 220px; max-width: 420px;
+}
+.search-box .search-ic {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  font-size: .9rem; opacity: .55; pointer-events: none;
+}
+.search-box input {
+  padding-left: 38px;
+  background: rgba(3, 4, 10, .6);
+  border: 1px solid var(--border-2);
+  border-radius: 99px;
+  padding-top: 10px; padding-bottom: 10px;
+}
+.search-box input:focus { border-color: rgba(124, 108, 255, .75); box-shadow: 0 0 0 4px rgba(124, 108, 255, .14); }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  padding: 7px 14px; border-radius: 99px; cursor: pointer;
+  font-size: .8rem; font-weight: 650; color: var(--text-3);
+  background: rgba(3, 4, 10, .5); border: 1px solid var(--border);
+  transition: all .15s; user-select: none;
+}
+.chip:hover { color: var(--text); border-color: var(--border-2); }
+.chip.active {
+  color: #fff;
+  background: var(--grad-soft);
+  border-color: rgba(124, 108, 255, .45);
+  box-shadow: inset 0 0 0 1px rgba(124, 108, 255, .35);
+}
+.items-toolbar .count { color: var(--text-3); font-size: .82rem; font-weight: 600; margin-left: auto; }
+
+/* chat promo card */
+.promo {
+  margin-top: 26px; padding: 22px 24px;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+.promo .promo-ic { font-size: 2rem; filter: drop-shadow(0 6px 18px rgba(124, 108, 255, .4)); }
+.promo .promo-body { flex: 1; min-width: 220px; }
+.promo .promo-body h3 { font-size: 1.05rem; font-weight: 800; }
+.promo .promo-body p { color: var(--text-2); font-size: .85rem; margin-top: 4px; line-height: 1.5; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 18px; }
 

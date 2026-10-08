@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
+const backup = require('./github-backup');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
@@ -46,10 +47,32 @@ const roomOwners = readJSON(paths.owners, {});
 if (!Array.isArray(items)) items.length = 0;
 if (!roomOwners || typeof roomOwners !== 'object' || Array.isArray(roomOwners)) for (const k of Object.keys(roomOwners)) delete roomOwners[k];
 
-function saveItems() { writeJSON(paths.items, items); }
-function saveLogs() { writeJSON(paths.logs, logs); }
-function saveChats() { writeJSON(paths.chats, chats); }
-function saveOwners() { writeJSON(paths.owners, roomOwners); }
+function saveItems() { writeJSON(paths.items, items); backupPush('data', 'items.json'); }
+function saveLogs() { writeJSON(paths.logs, logs); backupPush('data', 'logs.json'); }
+function saveChats() { writeJSON(paths.chats, chats); backupPush('data', 'chats.json'); }
+function saveOwners() { writeJSON(paths.owners, roomOwners); backupPush('data', 'owners.json'); }
+
+/* --- GitHub backup (backup-only, fire-and-forget, debounced) --- */
+function backupName(prefix, name) { return `${prefix}/${name}`; }
+const backupTimers = {};
+function backupPush(prefix, name) {
+  if (!backup.configured()) return;
+  const key = prefix + '/' + name;
+  if (backupTimers[key]) clearTimeout(backupTimers[key]);
+  backupTimers[key] = setTimeout(() => {
+    const abs = path.join(prefix === 'data' ? DATA_DIR : UPLOAD_DIR, name);
+    if (!fs.existsSync(abs)) return;
+    backup.put(backupName(prefix, name), abs)
+      .catch(e => console.error('[backup] push', name, e.message));
+  }, 8000);
+}
+function backupPushUpload(fileName) {
+  if (!backup.configured()) return;
+  const abs = path.join(UPLOAD_DIR, fileName);
+  if (!fs.existsSync(abs)) return;
+  backup.put(backupName('uploads', fileName), abs)
+    .catch(e => console.error('[backup] push upload', fileName, e.message));
+}
 
 function log(action, detail, req) {
   const ip = req
@@ -221,6 +244,7 @@ app.post('/api/items/upload', upload.single('file'), (req, res) => {
     deleted: false,
   };
   items.push(it); saveItems();
+  backupPushUpload(it.fileName);
   log('upload', `${it.type}: ${it.originalName} (${it.size} bytes)`, req);
   res.json(publicItem(it));
 });
@@ -241,6 +265,7 @@ app.post('/api/items/audio', upload.single('audio'), (req, res) => {
     deleted: false,
   };
   items.push(it); saveItems();
+  backupPushUpload(it.fileName);
   log('upload', `audio: ${it.title}`, req);
   res.json(publicItem(it));
 });
@@ -254,9 +279,19 @@ app.delete('/api/items/:id', requireAdmin, (req, res) => {
 });
 
 // ---- downloads / serving files
-app.get('/uploads/:filename', (req, res) => {
+app.get('/uploads/:filename', async (req, res) => {
   const fn = path.basename(req.params.filename);
   const p = path.join(UPLOAD_DIR, fn);
+  // file missing locally? try pulling it from the backup (covers restore-in-progress)
+  if (!fs.existsSync(p) && backup.configured()) {
+    try {
+      const f = await backup.getFile('uploads/' + fn);
+      if (f && f.content) {
+        fs.writeFileSync(p, Buffer.from(f.content, 'base64'));
+        log('backup_restore', fn, req);
+      }
+    } catch {}
+  }
   if (!fs.existsSync(p)) return res.status(404).send('Not found');
   if (req.query.download === '1') {
     const it = items.find(i => i.fileName === fn);
@@ -323,7 +358,10 @@ app.delete('/api/admin/items/:id/purge', requireAdmin, (req, res) => {
   const idx = items.findIndex(i => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'not found' });
   const [it] = items.splice(idx, 1);
-  if (it.fileName) { try { fs.unlinkSync(path.join(UPLOAD_DIR, it.fileName)); } catch {} }
+  if (it.fileName) {
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, it.fileName)); } catch {}
+    if (backup.configured()) backup.remove('uploads/' + it.fileName).catch(e => console.error('[backup] remove', e.message));
+  }
   saveItems();
   log('purge', it.title, req);
   res.json({ ok: true });
@@ -388,6 +426,7 @@ const chatUpload = multer({
 
 app.post('/api/chat/upload', chatUpload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no image or type rejected' });
+  backupPushUpload(req.file.filename);
   log('chat_image', req.file.originalname, req);
   res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename) });
 });
@@ -432,12 +471,13 @@ app.post('/api/chat/rooms/:room', (req, res) => {
   res.json({ ok: true, ownerToken: token });
 });
 
-/* private admin deletes any room (and its history) */
+/* private admin deletes any room (and its history) — never the public chat */
 app.delete('/api/chat/rooms/:room', (req, res) => {
   const pw = String(req.query.pw || req.body?.pw || '');
   if (pw !== PRIVATE_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
   const room = roomName(req.params.room);
   if (!room) return res.status(400).json({ error: 'invalid room' });
+  if (room === 'public') return res.status(403).json({ error: 'the public chat cannot be deleted' });
   delete chats[room];
   saveChats();
   io.to(room).emit('system', { ts: Date.now(), text: 'this room was deleted by an admin', kind: 'delete' });
@@ -513,12 +553,71 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Send server running:  http://localhost:${PORT}`);
-  console.log(`Admin panel:          http://localhost:${PORT}/admin`);
-  console.log(`Private chat:         http://localhost:${PORT}/private`);
-  if (process.env.ADMIN_PASSWORD) console.log('Admin password: supplied via ADMIN_PASSWORD env var');
-  else console.log(`Default admin password: ${ADMIN_PASSWORD_DEFAULT}  (change it in the admin panel)`);
-  console.log(`Data dir: ${DATA_DIR} · Uploads dir: ${UPLOAD_DIR}`);
-  console.log(`Private-admin password: ${PRIVATE_ADMIN_PASSWORD}${process.env.PRIVATE_ADMIN_PASSWORD ? ' (from env)' : ' — set PRIVATE_ADMIN_PASSWORD env to change'}`);
-});
+/* --- restore from backup (only when local data is EMPTY, e.g. after a redeploy) --- */
+async function backupRestoreData() {
+  const files = [
+    ['items.json', paths.items],
+    ['logs.json', paths.logs],
+    ['chats.json', paths.chats],
+    ['owners.json', paths.owners],
+  ];
+  let restored = 0;
+  for (const [name, target] of files) {
+    try {
+      const f = await backup.getFile('data/' + name);
+      if (f && f.content) { fs.writeFileSync(target, Buffer.from(f.content, 'base64')); restored++; }
+    } catch (e) { console.error('[backup] restore', name, e.message); }
+  }
+  console.log(`[backup] restored ${restored}/4 data files`);
+}
+
+async function backupRestoreUploads() {
+  try {
+    const list = await backup.listDir('uploads');
+    if (!Array.isArray(list)) return;
+    let n = 0;
+    for (const e of list) {
+      if (e.type !== 'file') continue;
+      const target = path.join(UPLOAD_DIR, e.name);
+      if (fs.existsSync(target)) continue;
+      try {
+        const f = await backup.getFile('uploads/' + e.name);
+        if (f && f.content) { fs.writeFileSync(target, Buffer.from(f.content, 'base64')); n++; }
+      } catch (err) { console.error('[backup] restore upload', e.name, err.message); }
+    }
+    if (n) console.log(`[backup] restored ${n} uploaded files`);
+  } catch (e) { console.error('[backup] restore uploads failed', e.message); }
+}
+
+/* boot: local data stays authoritative; GitHub repo is a backup.
+   Restore ONLY when local data is empty (fresh instance after a redeploy) —
+   never on every boot, and never overwrites data that exists locally. */
+(async function boot() {
+  backup.setup();
+
+  if (backup.configured()) {
+    const localItems = readJSON(paths.items, []);
+    if (!Array.isArray(localItems) || localItems.length === 0) {
+      console.log('[backup] local data empty — restoring from backup…');
+      await backupRestoreData();
+      items.length = 0; items.push(...readJSON(paths.items, []));
+      logs.length = 0; logs.push(...readJSON(paths.logs, []));
+      for (const k of Object.keys(chats)) delete chats[k];
+      Object.assign(chats, readJSON(paths.chats, {}));
+      for (const k of Object.keys(roomOwners)) delete roomOwners[k];
+      Object.assign(roomOwners, readJSON(paths.owners, {}));
+      backupRestoreUploads(); // background, non-blocking
+    }
+  }
+
+  server.listen(PORT, () => {
+    console.log(`Send server running:  http://localhost:${PORT}`);
+    console.log(`Admin panel:          http://localhost:${PORT}/admin`);
+    console.log(`Private chat:         http://localhost:${PORT}/private`);
+    if (process.env.ADMIN_PASSWORD) console.log('Admin password: supplied via ADMIN_PASSWORD env var');
+    else console.log(`Default admin password: ${ADMIN_PASSWORD_DEFAULT}  (change it in the admin panel)`);
+    console.log(`Data dir: ${DATA_DIR} · Uploads dir: ${UPLOAD_DIR}`);
+    console.log(`Private-admin password: ${PRIVATE_ADMIN_PASSWORD}${process.env.PRIVATE_ADMIN_PASSWORD ? ' (from env)' : ' — set PRIVATE_ADMIN_PASSWORD env to change'}`);
+    console.log(backup.configured() ? 'GitHub backup: ENABLED (push on change + restore when empty)' : 'GitHub backup: not configured');
+  });
+})();

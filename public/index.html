@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#07080f">
-  <title>Send — Share everything</title>
+  <title>Send</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📨</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
   <nav class="navbar">
@@ -14,24 +14,12 @@
       <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
       <div class="nav-links">
         <a href="/" class="active">Home</a>
-        <a href="/private">💬 Private Chat</a>
+        <a href="/private">💬 Chat</a>
       </div>
     </div>
   </nav>
 
   <div class="wrap">
-    <div class="hero">
-      <div style="flex:1; min-width: 260px">
-        <h1>Share anything,<br>instantly.</h1>
-        <p>Text notes, files, images and voice recordings — drag &amp; drop, paste, or record straight from your browser. Everything is stored and ready to share.</p>
-      </div>
-      <div class="spacer"></div>
-      <div class="small muted" style="text-align:right">
-        <div>⚡ up to 20 GB per file</div>
-        <div>🔒 stored on your server</div>
-      </div>
-    </div>
-
     <!-- composer -->
     <div class="card composer">
       <div class="tabs" id="composerTabs">
@@ -42,17 +30,18 @@
 
       <!-- text -->
       <div id="pane-text" class="tabpane">
-        <div>
-          <label class="fl">Title (optional)</label>
-          <input type="text" id="textTitle" placeholder="Give your note a title…">
+        <div class="row">
+          <div>
+            <label class="fl">Title (optional)</label>
+            <input type="text" id="textTitle" placeholder="Title…">
+          </div>
         </div>
         <div class="mt">
-          <label class="fl">Message / text</label>
-          <textarea id="textBody" placeholder="Type or paste anything here…"></textarea>
+          <label class="fl">Text</label>
+          <textarea id="textBody" placeholder="Type or paste anything…"></textarea>
         </div>
-        <div class="mt" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+        <div class="mt">
           <button class="btn primary" id="btnSendText">Send text →</button>
-          <span class="small muted">Tip: Ctrl/Cmd + V pastes images directly</span>
         </div>
       </div>
 
@@ -85,27 +74,40 @@
       </div>
     </div>
 
-    <!-- items -->
-    <div class="items-head">
-      <h2>Saved items</h2>
+    <!-- items toolbar: search + type filter -->
+    <div class="items-toolbar">
+      <div class="search-box">
+        <span class="search-ic">🔍</span>
+        <input type="text" id="searchInput" placeholder="Search items…" autocomplete="off">
+      </div>
+      <div class="chips" id="typeChips">
+        <button class="chip active" data-type="all">All</button>
+        <button class="chip" data-type="text">✍️ Text</button>
+        <button class="chip" data-type="image">🖼️ Images</button>
+        <button class="chip" data-type="audio">🎙️ Audio</button>
+        <button class="chip" data-type="video">🎬 Video</button>
+        <button class="chip" data-type="file">📦 Files</button>
+      </div>
       <span class="count" id="itemCount"></span>
-      <button class="btn small ghost right" id="btnRefresh">↻ Refresh</button>
+      <button class="btn small ghost" id="btnRefresh" title="Refresh">↻</button>
     </div>
+
+    <!-- items -->
     <div class="grid" id="items"></div>
 
-    <!-- private chat promo -->
-    <div class="card hoverable" style="margin-top:26px;padding:24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
-      <div style="font-size:2.2rem">💬</div>
-      <div style="flex:1;min-width:220px">
-        <h3 style="font-size:1.1rem;font-weight:800">Private chat rooms</h3>
-        <p class="small muted" style="margin-top:4px;line-height:1.55">Create a private room or join one with a code. Send text and images — only people with the code can see it.</p>
+    <!-- chat promo -->
+    <div class="card hoverable promo">
+      <div class="promo-ic">💬</div>
+      <div class="promo-body">
+        <h3>Chat rooms</h3>
+        <p>Public chat for everyone, or private rooms with a code.</p>
       </div>
-      <a class="btn primary" href="/private">Open private chat →</a>
+      <a class="btn primary" href="/private">Open chat →</a>
     </div>
   </div>
 
   <footer class="footer">
-    <div class="logo-sm">📨 Send · self-hosted file sharing</div>
+    <div class="logo-sm">📨 Send</div>
   </footer>
 
   <div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
@@ -127,6 +129,6 @@
 
   <div class="toasts" id="toasts"></div>
 
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

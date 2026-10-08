@@ -13,7 +13,7 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const parentSha = head.object.sha;
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: parentSha, tree }) });
-  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: 'Fix: remove room from local list on delete + manual remove button for stale rooms', tree: treeRes.sha, parents: [parentSha] }) });
+  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: 'Tidy home page + search/filter + protect public chat + GitHub backup storage', tree: treeRes.sha, parents: [parentSha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed');
   process.exit(0);

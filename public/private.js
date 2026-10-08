@@ -150,10 +150,10 @@ function joinRoom(code) {
 }
 
 function refreshDeleteRoomBtn() {
+  // the public chat can never be deleted by anyone
+  if (currentRoom === 'public') { $('#btnDeleteRoom').style.display = 'none'; return; }
   const canDelete = iAmAdmin || iAmOwner;
   $('#btnDeleteRoom').style.display = canDelete ? '' : 'none';
-  // only private admin can delete the public chat
-  if (currentRoom === 'public' && !iAmAdmin) $('#btnDeleteRoom').style.display = 'none';
 }
 
 /* ------------------------------- send / img ------------------------------- */
