@@ -111,15 +111,20 @@ and free HTTPS. (The site then *is* still hosted on your PC, but the URL is publ
 
 ### Admin panel (`/admin`)
 - Password-protected, hashed (scrypt) on disk + **brute-force lockout** (5 tries / 15 min)
-- **Logs & IPs**: every visit, upload, download, deletion, admin login and chat event with the
-  visitor's **IP address**, timestamp and user agent — with filters
-- **All items** overview (with uploader IP)
-- **Recycle bin**: everything deleted is restorable, or purge it permanently
-- Stats: item counts, visits, uploads, chat rooms, storage used
-- Change admin password
+- **Overview**: 12 stat cards (items, visits, unique IPs, chat, online now, AI…),
+  cloud-backup status (MEGA + GitHub), AI-bot stats and top visitors
+- **Activity**: log search + category chips (Visits / Uploads / Downloads / Chat / Admin / Deletions)
+- **Visitors**: every IP that ever hit the site — hits, first/last seen, top actions, UA
+- **Session-based visit logging**: one entry per visitor per 30 minutes, not per request
+  (browsers tracked by a cookie, bots/APIs by IP+UA)
+- **All items** overview (with uploader IP) + **Recycle bin** (restore / purge)
+- Change admin password **and private-admin password** (both persisted to the backups)
 
 ### Private chat (`/private`)
 - **Public chat** — one open room everyone joins (🌍 button)
+- **🤖 AI bot** — mention `@ai`/`@ai0` (funny 😏) or `@ai1` (mysterious 🌑) in ANY room;
+  there's also a private 1-on-1 **AI chat** button where it replies to every message
+  (rule-based, no external API, Arabic)
 - Private rooms: create one or join with a code; share the link `https://yoursite/private#roomcode`
 - **Send images** (🖼️ button or paste an image, up to 25 MB)
 - Delete your own messages (✕ always visible on your messages)
@@ -129,8 +134,10 @@ and free HTTPS. (The site then *is* still hosted on your PC, but the URL is publ
 
 ### Private admin (`/privateadmin` — hidden, not linked anywhere)
 - Log in with the `PRIVATE_ADMIN_PASSWORD` (default: `kalios`)
-- Browse **all** rooms with message counts, open any room, read every message
-- Delete any message and delete any room
+- Dashboard: rooms, messages, public-chat, online-now, unique-visitor and **AI stats** cards
+- Room cards show live online counts, visitor counts and last activity
+- Open any room: read every message, **see who's online now + everyone who ever entered (with IP)**,
+  delete any message and delete any room (the public chat can never be deleted)
 - Not linked in the navbar — reach it by typing the URL directly, like `/admin`
 
 Deleting needs the **admin password** (a small dialog asks for it if you aren't logged in as
