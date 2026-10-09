@@ -6,13 +6,14 @@
   <meta name="theme-color" content="#07080f">
   <title>Send</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📨</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=6">
+  <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-inner">
       <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
       <div class="nav-links">
+        <span id="nameChipHost"></span>
         <span class="nav-bell" id="btnBell">🔔<span class="bell-label"></span></span>
         <a href="/" class="active">Home</a>
         <a href="/private" id="navChat">💬 Chat</a>
@@ -108,7 +109,7 @@
   </div>
 
   <footer class="footer">
-    <div class="logo-sm">📨 Send</div>
+    <div class="logo-sm">📨 Send · <span class="crown">👑 Crafted by Qai9rr</span></div>
   </footer>
 
   <div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
@@ -131,23 +132,23 @@
   <!-- edit text item modal -->
   <div class="lightbox" id="editModal">
     <div class="card" style="max-width:480px;width:calc(100% - 32px);padding:26px">
-      <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:14px">✎ تعديل النص</h3>
+      <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:14px">✎ Edit note</h3>
       <div class="field">
-        <label class="fl">العنوان</label>
+        <label class="fl">Title</label>
         <input type="text" id="editTitle" dir="auto">
       </div>
       <div class="field">
-        <label class="fl">النص</label>
+        <label class="fl">Text</label>
         <textarea id="editText" dir="auto" style="min-height:120px"></textarea>
       </div>
       <div class="field hidden" id="editPwField">
-        <label class="fl">باسورد الأدمن</label>
+        <label class="fl">Admin password</label>
         <input type="password" id="editPw" autocomplete="off" style="text-align:left">
       </div>
       <div class="small" id="editError" style="color:var(--danger);min-height:16px;font-weight:600"></div>
       <div style="display:flex;gap:10px;margin-top:12px">
-        <button class="btn" id="editCancel" style="flex:1">إلغاء</button>
-        <button class="btn primary" id="editSave" style="flex:1">حفظ</button>
+        <button class="btn" id="editCancel" style="flex:1">Cancel</button>
+        <button class="btn primary" id="editSave" style="flex:1">Save</button>
       </div>
     </div>
   </div>
@@ -155,7 +156,8 @@
   <div class="toasts" id="toasts"></div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=6"></script>
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/notify.js?v=7"></script>
+  <script src="/static/profile.js?v=7"></script>
+  <script src="/static/app.js?v=7"></script>
 </body>
 </html>

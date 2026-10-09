@@ -174,10 +174,10 @@ function appendMsg(m) {
   const quote = m.replyTo
     ? `<div class="reply-quote" dir="auto"><b>${esc(m.replyTo.name)}</b><br>${esc(m.replyTo.text)}</div>` : '';
   const txt = m.text
-    ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(معدّلة)</span>' : ''}</div>` : '';
+    ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}</div>` : '';
   const who = m.bot ? 'Kali' : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}`;
   el.innerHTML = `<div class="who">${who}</div>
-    <div class="bubble">${img}${quote}${txt}<button class="msg-act msg-del" data-del="${m.id}" title="حذف">✕</button></div>
+    <div class="bubble">${img}${quote}${txt}<button class="msg-act msg-del" data-del="${m.id}" title="Delete">✕</button></div>
     <div class="time">${esc(fmtTime(m.ts))}</div>`;
   $('#viewMessages').appendChild(el);
   $('#viewMessages').scrollTop = $('#viewMessages').scrollHeight;
@@ -209,7 +209,7 @@ socket.on('editmsg', ({ id, text }) => {
   const t = el.querySelector('.msg-text');
   if (t) {
     t.textContent = text;
-    if (!t.querySelector('.edited-tag')) t.insertAdjacentHTML('beforeend', '<span class="edited-tag">(معدّلة)</span>');
+    if (!t.querySelector('.edited-tag')) t.insertAdjacentHTML('beforeend', '<span class="edited-tag">(edited)</span>');
   }
 });
 socket.on('system', m => { appendSys(m); if (m.kind === 'delete') $('#btnBack').click(); if (m.kind === 'join' || m.kind === 'leave') loadVisitors(currentRoom); });

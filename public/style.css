@@ -362,7 +362,15 @@ label.fl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: 
 /* lightbox */
 .lightbox { position: fixed; inset: 0; z-index: 220; background: rgba(3, 4, 10, .94); backdrop-filter: blur(8px); display: none; place-items: center; padding: 34px; cursor: zoom-out; }
 .lightbox.open { display: grid; animation: fade .2s; }
-.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r); box-shadow: 0 30px 90px rgba(0, 0, 0, .8); border: 1px solid var(--border-2); }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r); box-shadow: 0 30px 90px rgba(0, 0, 0, .8); border: 1px solid var(--border-2); cursor: default; }
+.lightbox-close {
+  position: absolute; top: 18px; right: 18px; z-index: 2;
+  width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+  background: rgba(20, 26, 40, .85); color: #fff; border: 1px solid var(--border-2);
+  font-size: 1rem; display: grid; place-items: center;
+}
+.lightbox-close:hover { background: rgba(251, 113, 133, .3); border-color: rgba(251, 113, 133, .6); }
+.crown { color: #c4b5fd; font-weight: 700; }
 #delModal { cursor: default; }
 #delModal .card { animation: pop .26s cubic-bezier(.2, .8, .2, 1); }
 .lock-ic {
@@ -594,6 +602,14 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .nav-bell:hover { color: var(--text); background: var(--surface-2); }
 .nav-bell.active { color: #6ee7b7; border-color: rgba(52, 211, 153, .35); background: rgba(52, 211, 153, .08); }
 .nav-bell .bell-label { font-size: .68rem; font-weight: 700; }
+.name-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 13px; border-radius: 99px; cursor: pointer;
+  color: var(--text-2); border: 1px solid var(--border-2);
+  background: rgba(3, 4, 10, .55); font-size: .84rem; font-weight: 650;
+  transition: all .15s;
+}
+.name-chip:hover { color: var(--text); border-color: rgba(124, 108, 255, .5); background: rgba(124, 108, 255, .09); }
 .bell-pop {
   display: none; position: absolute; top: calc(100% + 8px); inset-inline-end: 0;
   z-index: 150; min-width: 190px; padding: 12px;
@@ -604,6 +620,12 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .bell-pop.open { display: flex; }
 .bell-pop .bell-title { font-weight: 800; font-size: .88rem; }
 .bell-pop .bell-state { margin-bottom: 4px; }
+.bell-custom { display: flex; gap: 6px; }
+.bell-custom input {
+  width: 100%; min-width: 0; padding: 6px 9px; font-size: .82rem;
+  background: #0c1119; border: 1px solid var(--border-2); border-radius: 8px; color: var(--text);
+}
+.bell-custom input:focus { border-color: var(--accent); }
 
 /* gate action cards (public / kali) */
 .gate-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 6px; }

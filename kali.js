@@ -13,10 +13,11 @@ const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : pat
 const KALI_FILE = path.join(DATA_DIR, 'kali.json');
 
 const DEFAULT_SYSTEM = [
-  'أنت "كالي"، شخص حقيقي داخل دردشة عربية صغيرة.',
-  'ترد بالعربي بجمل قصيرة وذكية وواضحة، فيها خفة دم وظرافة من دون مبالغة.',
-  'ما تقدم نفسك كمساعد ولا تذكر أنك ذكاء اصطناعي إلا إذا انسألت عن ذلك مباشرة.',
-  'كن طبيعياً مثل أي شخص في الدردشة، وتجنّب الإطالة في الأجوبة.',
+  'You are "Kali", a real person hanging out in a small chat site.',
+  'You reply in the same language the room speaks (Arabic chats → Arabic, English → English).',
+  'Keep replies short, smart and clear, with light wit — never overdo it.',
+  'Never introduce yourself as an assistant or mention being an AI unless directly asked.',
+  'Be natural like any person in the chat, and never write long walls of text.',
 ].join(' ');
 
 let cfg = { system: DEFAULT_SYSTEM, enabled: true };
@@ -51,14 +52,14 @@ function setConfig(next) {
   return getConfig();
 }
 
-/* fallback replies (used when the API is unavailable) — short, one personality */
+/* fallback replies (used when the API is unavailable) — one personality */
 const FALLBACKS = [
-  'نمت قواع أفكر برد… أعطني ثانية ثانية 😅',
-  'هذي أحتاج لها قهوة، اسألني مرة ثانية.',
-  'هممم… وش تقول بالضبط؟ صياغتك محيرتني.',
-  'مدري والله، بس لو بغيت رأيي: لا.',
-  'أنا هنا بس راسي شوي معلق، كمل لاحقاً 😅',
-  'سؤالك وصل، بس جوابي تأخر… جرب من جديد.',
+  'I drifted off for a second there… ask me again 😅',
+  'Hmm, that one needs coffee. Try me again.',
+  'Not sure I follow — say it a bit differently?',
+  'Honestly no idea, but if you want my take: nah.',
+  'I zoned out mid-thought… give it another shot.',
+  'Got your message, my brain lagged though. Again?',
 ];
 const fb = () => FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)];
 
@@ -100,7 +101,7 @@ async function reply(prompt, userName, history) {
   if (!apiKey) return fb();
   try {
     const parts = [];
-    if (userName && !/^@\s*$/.test(userName)) parts.push(`${userName} يقول:`);
+    if (userName) parts.push(`${userName} says:`);
     parts.push(String(prompt || '').trim() || '...');
     const text = await gemini(history || [], parts.join(' '));
     return text || fb();

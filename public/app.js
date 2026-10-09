@@ -423,12 +423,12 @@ $('#editSave').addEventListener('click', async () => {
     // if not admin yet, try to log in first with the typed password
     if (!isAdmin) {
       const pw = $('#editPw').value;
-      if (!pw) { $('#editError').textContent = 'اكتب باسورد الأدمن'; btn.disabled = false; return; }
+      if (!pw) { $('#editError').textContent = 'Enter the admin password'; btn.disabled = false; return; }
       const lr = await fetch('/api/admin/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pw }),
       });
-      if (!lr.ok) { $('#editError').textContent = 'باسورد غلط'; btn.disabled = false; return; }
+      if (!lr.ok) { $('#editError').textContent = 'Wrong password'; btn.disabled = false; return; }
       isAdmin = true;
       $('#editPwField').classList.add('hidden');
     }
@@ -438,16 +438,16 @@ $('#editSave').addEventListener('click', async () => {
       body: JSON.stringify({ title: $('#editTitle').value, text: $('#editText').value }),
     });
     if (r.ok) {
-      toast('✓ تم التعديل');
+      toast('✓ Note updated');
       $('#editModal').classList.remove('open');
       editingId = null;
       load();
     } else {
       const d = await r.json().catch(() => ({}));
-      $('#editError').textContent = d.error || 'فشل التعديل';
+      $('#editError').textContent = d.error || 'Edit failed';
     }
-  } catch { $('#editError').textContent = 'فشل الاتصال'; }
-  btn.disabled = false; btn.textContent = 'حفظ';
+  } catch { $('#editError').textContent = 'Connection failed'; }
+  btn.disabled = false; btn.textContent = 'Save';
 });
 
 /* ---------------- site notifications (uploads + public chat dot) ---------------- */
@@ -464,5 +464,9 @@ siteSocket.on('public_activity', () => {
     if (Notify.active() && !document.hasFocus()) Notify.play();
   }
 });
+
+/* ---------------- profile: first-visit name + navbar chip ---------------- */
+Profile.ensureModal().then(() => Profile.chip('#nameChipHost'));
+document.addEventListener('profile:name', () => { /* chip re-renders itself */ });
 
 load();

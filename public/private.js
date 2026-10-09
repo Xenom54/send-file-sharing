@@ -12,8 +12,6 @@ function toast(msg, kind = 'ok') {
 }
 
 const store = {
-  get name() { return localStorage.getItem('send_name') || ''; },
-  set name(v) { localStorage.setItem('send_name', v); },
   get uid() { let u = localStorage.getItem('send_uid'); if (!u) { u = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('send_uid', u); } return u; },
   get rooms() { try { return JSON.parse(localStorage.getItem('send_rooms') || '[]'); } catch { return []; } },
   set rooms(v) { localStorage.setItem('send_rooms', JSON.stringify(v)); },
@@ -23,12 +21,14 @@ const store = {
   setOwnerToken(code, token) { localStorage.setItem('send_owner_' + code, token); },
   clearOwnerToken(code) { localStorage.removeItem('send_owner_' + code); },
 };
+const userName = () => Profile.get() || 'guest';
 
 const socket = io({ autoConnect: false, transports: ['websocket', 'polling'] });
 let currentRoom = null;
 let iAmAdmin = false, iAmOwner = false;
 let typingTimeout = null, lastTyping = 0;
 let replyTarget = null; // { id, name, text }
+let lastMsgs = [];
 
 /* ------------------------------ unread dots ------------------------------- */
 function markUnread(room) {
@@ -55,17 +55,14 @@ function renderUnread() {
 /* connect at page load so activity/notification events arrive even from the gate */
 socket.connect();
 
-$('#gateName').value = store.name;
-$('#gateName').addEventListener('input', () => store.name = $('#gateName').value.trim());
-
 function renderMyRooms() {
   const rooms = store.rooms;
   const u = store.unread;
   $('#myRooms').innerHTML = rooms.length
-    ? `<label class="fl">غرفك الأخيرة</label>` + rooms.map(r =>
+    ? `<label class="fl">Your recent rooms</label>` + rooms.map(r =>
         `<div class="room-item" data-goto="${esc(r)}">
-           <button class="room-main" data-goto="${esc(r)}"><span>${u[r] ? '<span class="unread-dot"></span> ' : ''}💬 ${esc(r)}</span><span class="code">دخول ←</span></button>
-           <button class="room-x" data-remove="${esc(r)}" title="إزالة من القائمة">✕</button>
+           <button class="room-main" data-goto="${esc(r)}"><span>${u[r] ? '<span class="unread-dot"></span> ' : ''}💬 ${esc(r)}</span><span class="code">join →</span></button>
+           <button class="room-x" data-remove="${esc(r)}" title="Remove from list">✕</button>
          </div>`).join('')
     : '';
 }
@@ -88,7 +85,6 @@ function addRoom(code) {
   renderMyRooms();
 }
 
-/* remove a room from the local "recent rooms" list + its owner token */
 function removeRoom(code) {
   store.rooms = store.rooms.filter(r => r !== code);
   store.clearOwnerToken(code);
@@ -100,8 +96,8 @@ function renderRoomList() {
   const u = store.unread;
   $('#roomList').innerHTML = store.rooms.map(r =>
     `<div class="room-item ${r === currentRoom ? 'active' : ''}">
-       <button class="room-main" data-goto="${esc(r)}"><span>${u[r] ? '<span class="unread-dot"></span> ' : ''}💬 ${esc(r)}</span><span class="code">${r === currentRoom ? '● هنا' : 'فتح'}</span></button>
-       <button class="room-x" data-remove="${esc(r)}" title="إزالة من القائمة">✕</button>
+       <button class="room-main" data-goto="${esc(r)}"><span>${u[r] ? '<span class="unread-dot"></span> ' : ''}💬 ${esc(r)}</span><span class="code">${r === currentRoom ? '● here' : 'open'}</span></button>
+       <button class="room-x" data-remove="${esc(r)}" title="Remove from list">✕</button>
      </div>`).join('');
   $('#roomPublic').classList.toggle('active', currentRoom === 'public');
   $('#roomKali').classList.toggle('active', !!currentRoom && currentRoom.startsWith('ai-'));
@@ -127,28 +123,32 @@ function genCode() {
 }
 
 /* ------------------------------- create/join ------------------------------ */
+async function ensureName() {
+  // first visit: make the person pick a name (shared modal)
+  await Profile.ensureModal();
+  $('#gateWelcome').textContent = `Welcome, ${userName()} — pick a conversation.`;
+}
+
 $('#btnCreate').addEventListener('click', async () => {
-  const name = $('#gateName').value.trim() || 'anonymous';
-  store.name = name;
+  await ensureName();
   const code = genCode();
   try {
     const r = await fetch('/api/chat/rooms/' + encodeURIComponent(code), { method: 'POST' });
     const d = await r.json();
-    if (!r.ok) return toast('⚠ ' + (d.error || 'تعذر إنشاء الغرفة'), 'err');
+    if (!r.ok) return toast('⚠ ' + (d.error || 'Could not create the room'), 'err');
     store.setOwnerToken(code, d.ownerToken);
     startChat(code);
-  } catch { toast('⚠ تعذر إنشاء الغرفة', 'err'); }
+  } catch { toast('⚠ Could not create the room', 'err'); }
 });
 $('#btnJoin').addEventListener('click', tryJoin);
 $('#gateRoom').addEventListener('keydown', e => { if (e.key === 'Enter') tryJoin(); });
-$('#btnPublic').addEventListener('click', () => { store.name = $('#gateName').value.trim() || 'anonymous'; startChat('public'); });
-$('#btnKali').addEventListener('click', () => { store.name = $('#gateName').value.trim() || 'anonymous'; startChat('ai-' + store.uid); });
+$('#btnPublic').addEventListener('click', async () => { await ensureName(); startChat('public'); });
+$('#btnKali').addEventListener('click', async () => { await ensureName(); startChat('ai-' + store.uid); });
 
-function tryJoin() {
+async function tryJoin() {
+  await ensureName();
   const code = $('#gateRoom').value.trim().toLowerCase();
-  const name = $('#gateName').value.trim() || 'anonymous';
-  store.name = name;
-  if (!code) return toast('⚠ اكتب كود الغرفة', 'err');
+  if (!code) return toast('⚠ Enter a room code', 'err');
   startChat(code);
 }
 
@@ -160,20 +160,21 @@ function startChat(code) {
   joinRoom(code);
 }
 
-function joinRoom(code) {
-  const name = store.name || 'anonymous';
-  store.name = name;
+function joinRoom(code, opts = {}) {
+  const name = userName();
   currentRoom = code;
   const isKali = code.startsWith('ai-');
   iAmOwner = (code === 'public' || isKali) ? false : !!store.ownerToken(code);
-  $('#roomTitle').textContent = isKali ? 'كالي' : (code === 'public' ? 'الشات العام' : code);
+  $('#roomTitle').textContent = isKali ? 'Kali' : (code === 'public' ? 'Public chat' : code);
   $('#roomIcon').textContent = isKali ? '✨' : (code === 'public' ? '🌍' : '💬');
   if (!iAmAdmin) $('#adminBadge').classList.add('hidden');
   $('#btnDeleteRoom').style.display = 'none';
-  $('#messages').innerHTML = '';
-  $('#msgInput').value = '';
-  $('#typingInd').textContent = '';
-  $('#msgInput').placeholder = isKali ? 'اكلم كالي… أو نادِه بأي غرفة بـ @kali' : 'اكتب رسالة… (@kali لمناداة كالي)';
+  if (!opts.silent) {
+    $('#messages').innerHTML = '';
+    $('#msgInput').value = '';
+    $('#typingInd').textContent = '';
+  }
+  $('#msgInput').placeholder = isKali ? 'Talk to Kali… (or summon it anywhere with @kali)' : 'Type a message… (@kali to summon Kali)';
   $('#membersPanel').classList.toggle('hidden', !iAmAdmin);
   cancelReply();
   const pw = sessionStorage.getItem('send_privateadmin_pw') || '';
@@ -200,7 +201,7 @@ function refreshDeleteRoomBtn() {
 
 /* ---------------------------- admin unlock (hidden) ----------------------- */
 $('#btnAdminUnlock').addEventListener('click', () => {
-  if (iAmAdmin) return toast('✓ وضع الأدمن مفعّل');
+  if (iAmAdmin) return toast('✓ Admin mode already active');
   $('#adminPwInput').value = '';
   $('#adminPwError').textContent = '';
   $('#adminModal').classList.add('open');
@@ -214,7 +215,7 @@ $('#adminConfirm').addEventListener('click', async () => {
   const pw = $('#adminPwInput').value;
   if (!pw) return;
   const btn = $('#adminConfirm');
-  btn.disabled = true; btn.textContent = 'جارٍ…';
+  btn.disabled = true; btn.textContent = 'Checking…';
   try {
     const r = await fetch('/api/privateadmin/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pw }),
@@ -225,16 +226,16 @@ $('#adminConfirm').addEventListener('click', async () => {
       iAmAdmin = true;
       $('#adminBadge').classList.remove('hidden');
       $('#membersPanel').classList.remove('hidden');
-      toast('🛡️ وضع الأدمن مفعّل');
-      socket.emit('join', { room: currentRoom, name: store.name || 'anonymous', uid: store.uid, pw }, (ack) => {
+      toast('🛡️ Admin mode active');
+      socket.emit('join', { room: currentRoom, name: userName(), uid: store.uid, pw }, (ack) => {
         if (ack && ack.admin) { refreshDeleteRoomBtn(); }
       });
     } else {
-      $('#adminPwError').textContent = 'باسورد غلط';
+      $('#adminPwError').textContent = 'Wrong password';
       $('#adminPwInput').value = '';
     }
-  } catch { $('#adminPwError').textContent = 'فشل الاتصال'; }
-  btn.disabled = false; btn.textContent = 'فتح';
+  } catch { $('#adminPwError').textContent = 'Connection failed'; }
+  btn.disabled = false; btn.textContent = 'Unlock';
 });
 
 /* live presence updates (only the server sends these to admin sockets) */
@@ -243,7 +244,7 @@ socket.on('presence', ({ room, online }) => {
   $('#membersCount').textContent = (online || []).length;
   $('#membersList').innerHTML = (online || []).length
     ? online.map(u => `<div class="member-row"><span class="dot on"></span>${esc(u.name)}${u.admin ? ' 🛡️' : ''}</div>`).join('')
-    : '<div class="small muted">ما فيه أحد غيرك.</div>';
+    : '<div class="small muted">Nobody else online.</div>';
 });
 
 /* ------------------------------- send / img ------------------------------- */
@@ -278,19 +279,19 @@ $('#msgInput').addEventListener('paste', e => {
 });
 
 async function sendImage(file) {
-  if (!file.type.startsWith('image/')) return toast('⚠ صور فقط', 'err');
-  if (file.size > 25 * 1024 * 1024) return toast('⚠ الصورة كبيرة (الحد 25 ميجا)', 'err');
+  if (!file.type.startsWith('image/')) return toast('⚠ Images only', 'err');
+  if (file.size > 25 * 1024 * 1024) return toast('⚠ Image too large (max 25 MB)', 'err');
   const btn = $('#btnImage');
   btn.disabled = true;
-  toast('📎 جارٍ رفع الصورة…');
+  toast('📎 Uploading image…');
   const fd = new FormData();
   fd.append('image', file);
   try {
     const r = await fetch('/api/chat/upload', { method: 'POST', body: fd });
     const d = await r.json();
-    if (!r.ok) return toast('⚠ فشل الرفع: ' + (d.error || ''), 'err');
+    if (!r.ok) return toast('⚠ Upload failed: ' + (d.error || ''), 'err');
     socket.emit('msg', { text: '', image: d.url });
-  } catch { toast('⚠ فشل الرفع', 'err'); }
+  } catch { toast('⚠ Upload failed', 'err'); }
   finally { btn.disabled = false; }
 }
 
@@ -299,19 +300,19 @@ function actionsHTML(m, mine) {
   const canEdit = (mine || iAmAdmin) && !m.bot && !m.image;
   const canDelete = mine || iAmAdmin;
   let out = '';
-  if (canEdit) out += `<button class="msg-act msg-edit" data-edit="${m.id}" title="تعديل">✎</button>`;
-  out += `<button class="msg-act msg-reply" data-reply="${m.id}" title="رد">↩</button>`;
-  if (canDelete) out += `<button class="msg-act msg-del" data-del="${m.id}" title="حذف">✕</button>`;
+  if (canEdit) out += `<button class="msg-act msg-edit" data-edit="${m.id}" title="Edit">✎</button>`;
+  out += `<button class="msg-act msg-reply" data-reply="${m.id}" title="Reply">↩</button>`;
+  if (canDelete) out += `<button class="msg-act msg-del" data-del="${m.id}" title="Delete">✕</button>`;
   return out;
 }
 
 function bubbleHTML(m, mine) {
   const img = m.image
-    ? `<a href="${esc(m.image)}" target="_blank" rel="noopener"><img src="${esc(m.image)}" alt="image" class="chat-img"></a>`
+    ? `<img src="${esc(m.image)}" alt="image" class="chat-img zoomable" data-full="${esc(m.image)}">`
     : '';
   const txt = m.text
-    ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(معدّلة)</span>' : ''}</div>`
-    : (m.image ? '' : '<div class="msg-text muted">(فارغة)</div>');
+    ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}</div>`
+    : (m.image ? '' : '<div class="msg-text muted">(empty)</div>');
   const quote = m.replyTo
     ? `<div class="reply-quote" dir="auto"><b>${esc(m.replyTo.name)}</b><br>${esc(m.replyTo.text)}</div>` : '';
   return `${img}${quote}${txt}${actionsHTML(m, mine)}`;
@@ -321,7 +322,7 @@ function appendMsg(m, mine) {
   const el = document.createElement('div');
   el.className = 'msg' + (mine ? ' mine' : '') + (m.admin ? ' admin-msg' : '') + (m.bot ? ' bot-msg' : '');
   el.dataset.mid = m.id;
-  const who = m.bot ? 'Kali' : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}${mine ? ' (أنت)' : ''}`;
+  const who = m.bot ? 'Kali' : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}${mine ? ' (you)' : ''}`;
   el.innerHTML = `<div class="who">${who}</div>
     <div class="bubble">${bubbleHTML(m, mine)}</div>
     <div class="time">${esc(fmtTime(m.ts))}</div>`;
@@ -336,6 +337,14 @@ function appendSys(m) {
   $('#messages').scrollTop = $('#messages').scrollHeight;
 }
 
+/* render one existing message's bubble (used by edit/cancel) */
+function renderBubbleFromMsg(id) {
+  const m = lastMsgs.find(x => x.id === id);
+  const el = $('#messages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
+  if (!el || !m) return;
+  el.querySelector('.bubble').innerHTML = bubbleHTML(m, m.uid === store.uid);
+}
+
 /* --------------------- hidden actions: reply / edit / delete --------------------- */
 $('#messages').addEventListener('click', e => {
   const rep = e.target.closest('[data-reply]');
@@ -344,12 +353,12 @@ $('#messages').addEventListener('click', e => {
   if (edt) return startEdit(edt.dataset.edit);
   const del = e.target.closest('[data-del]');
   if (del) {
-    if (!confirm('حذف الرسالة؟')) return;
+    if (!confirm('Delete this message?')) return;
     socket.emit('delmsg', { id: del.dataset.del });
     return;
   }
-  const img = e.target.closest('.zoomable');
-  if (img) { window.open(img.src, '_blank'); }
+  const zoom = e.target.closest('.zoomable');
+  if (zoom) openLightbox(zoom.dataset.full || zoom.src);
 });
 
 /* reply */
@@ -359,7 +368,7 @@ function startReply(id) {
   const name = el.querySelector('.who')?.textContent.split(' ')[0] || '?';
   const text = el.querySelector('.msg-text')?.textContent || '';
   replyTarget = { id, name, text: text.slice(0, 60) };
-  $('#replyBarText').innerHTML = `↩ ترد على <b>${esc(name)}</b>: ${esc(replyTarget.text)}`;
+  $('#replyBarText').innerHTML = `↩ Replying to <b>${esc(name)}</b>: ${esc(replyTarget.text)}`;
   $('#replyBar').classList.add('open');
   $('#msgInput').focus();
 }
@@ -370,89 +379,103 @@ function cancelReply() {
 }
 $('#replyCancel').addEventListener('click', cancelReply);
 
-/* inline edit */
+/* inline edit — save updates the UI instantly */
 function startEdit(id) {
   const el = $('#messages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
   if (!el) return;
   const bubble = el.querySelector('.bubble');
   if (!bubble || bubble.querySelector('.edit-box')) return;
-  const current = el.querySelector('.msg-text')?.textContent.replace(/\(معدّلة\)$/, '').trim() || '';
+  const m = lastMsgs.find(x => x.id === id);
+  const current = m ? m.text : (el.querySelector('.msg-text')?.textContent || '');
   const quote = el.querySelector('.reply-quote')?.outerHTML || '';
-  const actions = el.querySelector('.msg-text')?.nextElementSibling?.outerHTML || '';
   bubble.innerHTML = `${quote}
     <textarea class="edit-box" dir="auto" style="width:100%;min-height:60px;background:#0c1119;color:inherit;border:1px solid var(--accent);border-radius:8px;padding:8px">${esc(current)}</textarea>
     <div style="display:flex;gap:6px;margin-top:6px">
-      <button class="btn small primary" data-editsave="${id}">حفظ</button>
-      <button class="btn small" data-editcancel="1">إلغاء</button>
+      <button class="btn small primary" data-editsave="${id}">Save</button>
+      <button class="btn small" data-editcancel="${id}">Cancel</button>
     </div>`;
-  bubble.querySelector('.edit-box').focus();
+  const box = bubble.querySelector('.edit-box');
+  box.focus();
+  box.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); bubble.querySelector('[data-editsave]').click(); }
+    if (e.key === 'Escape') { e.stopPropagation(); bubble.querySelector('[data-editcancel]').click(); }
+  });
 }
+
 $('#messages').addEventListener('click', e => {
   const sv = e.target.closest('[data-editsave]');
   if (sv) {
+    const id = sv.dataset.editsave;
     const box = sv.closest('.bubble').querySelector('.edit-box');
     const text = box.value.trim();
-    if (!text) return toast('⚠ النص فاضي', 'err');
-    socket.emit('editmsg', { id: sv.dataset.editsave, text });
+    if (!text) return toast('⚠ Text is empty', 'err');
+    socket.emit('editmsg', { id, text });
+    // instant UI update (server event below is the confirmation for everyone else)
+    const m = lastMsgs.find(x => x.id === id);
+    if (m) { m.text = text; m.edited = true; }
+    renderBubbleFromMsg(id);
     return;
   }
   const cx = e.target.closest('[data-editcancel]');
-  if (cx) {
-    // re-render the room from history: simplest is to request nothing; just restore from stored msg
-    const idEl = cx.closest('[data-mid]');
-    const msg = lastMsgs.find(m => m.id === idEl?.dataset.mid);
-    if (msg) renderBubbleFromMsg(idEl, msg);
-  }
+  if (cx) renderBubbleFromMsg(cx.dataset.editcancel);
 });
 
-let lastMsgs = [];
-function renderBubbleFromMsg(el, m) {
-  if (!el) return;
-  const mine = m.uid === store.uid;
-  el.querySelector('.bubble').innerHTML = bubbleHTML(m, mine);
-}
-
 socket.on('editmsg', ({ id, text }) => {
+  // keep local copy in sync (for other users / reconnects)
+  const m = lastMsgs.find(x => x.id === id);
+  if (m) { m.text = text; m.edited = true; }
   const el = $('#messages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
-  if (!el) return;
-  const t = el.querySelector('.msg-text');
-  if (t) {
-    t.textContent = text;
-    if (!t.querySelector('.edited-tag')) t.insertAdjacentHTML('beforeend', '<span class="edited-tag">(معدّلة)</span>');
-  }
+  if (!el || el.querySelector('.edit-box')) return; // still editing → skip re-render
+  el.querySelector('.bubble').innerHTML = bubbleHTML(m, m && m.uid === store.uid);
 });
 
 socket.on('delmsg', ({ id }) => {
+  lastMsgs = lastMsgs.filter(m => m.id !== id);
   const el = $('#messages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
   if (el) el.remove();
 });
+
+/* -------------------------- image lightbox (chat) -------------------------- */
+function openLightbox(src) {
+  if (!src) return;
+  $('#chatLightboxImg').src = src;
+  $('#chatLightbox').classList.add('open');
+}
+$('#chatLightbox').addEventListener('click', e => {
+  if (e.target.id === 'chatLightbox' || e.target.id === 'chatLightboxClose' || e.target.tagName === 'IMG' === false) {
+    if (e.target.id !== 'chatLightboxImg') $('#chatLightbox').classList.remove('open');
+  }
+});
+$('#chatLightboxClose').addEventListener('click', () => $('#chatLightbox').classList.remove('open'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#chatLightbox').classList.remove('open'); });
 
 /* ------------------------------ delete room ------------------------------- */
 $('#btnDeleteRoom').addEventListener('click', async () => {
   if (!currentRoom) return;
   if (!iAmAdmin && !iAmOwner) return;
-  if (!confirm(`حذف الغرفة #${currentRoom} وكل رسائلها؟`)) return;
+  if (!confirm(`Delete room #${currentRoom} and all its messages?`)) return;
   const url = iAmAdmin
     ? `/api/chat/rooms/${encodeURIComponent(currentRoom)}?pw=${encodeURIComponent(sessionStorage.getItem('send_privateadmin_pw') || '')}`
     : `/api/chat/rooms/${encodeURIComponent(currentRoom)}/mine?token=${encodeURIComponent(store.ownerToken(currentRoom) || '')}`;
   try {
     const r = await fetch(url, { method: 'DELETE' });
     const d = await r.json();
-    if (!r.ok) return toast('⚠ ' + (d.error || 'فشل الحذف'), 'err');
-    toast('🗑 انحذفت الغرفة');
+    if (!r.ok) return toast('⚠ ' + (d.error || 'Delete failed'), 'err');
+    toast('🗑 Room deleted');
     removeRoom(currentRoom);
     location.href = '/private';
-  } catch { toast('⚠ فشل الحذف', 'err'); }
+  } catch { toast('⚠ Delete failed', 'err'); }
 });
 
 $('#btnShare').addEventListener('click', async () => {
   const url = location.origin + '/private#' + currentRoom;
-  try { await navigator.clipboard.writeText(url); toast('✓ انسخ رابط الغرفة'); }
-  catch { $('#roomTitle').textContent = url; toast('⚠ النسخ فشل — الرابط في العنوان', 'err'); }
+  try { await navigator.clipboard.writeText(url); toast('✓ Room link copied'); }
+  catch { $('#roomTitle').textContent = url; toast('⚠ Copy failed — link is in the room title', 'err'); }
 });
 
 $('#btnLeave').addEventListener('click', () => location.href = '/private');
 $('#btnNewRoom').addEventListener('click', async () => {
+  await ensureName();
   const code = genCode();
   try {
     const r = await fetch('/api/chat/rooms/' + encodeURIComponent(code), { method: 'POST' });
@@ -463,14 +486,22 @@ $('#btnNewRoom').addEventListener('click', async () => {
 });
 
 /* ------------------------------- socket events ------------------------------ */
-socket.on('connect', () => { /* join handled on demand */ });
+/* auto-rejoin: if the connection drops and comes back (server restart, network
+   blip), silently rejoin the current room so the user never gets "kicked out" */
+socket.on('connect', () => {
+  if (currentRoom) joinRoom(currentRoom, { silent: false });
+});
 socket.on('history', list => {
   lastMsgs = list || [];
+  $('#messages').innerHTML = '';
   lastMsgs.forEach(m => appendMsg(m, m.uid === store.uid));
+  $('#messages').scrollTop = $('#messages').scrollHeight;
 });
 socket.on('msg', m => {
-  lastMsgs.push(m);
-  if (lastMsgs.length > 300) lastMsgs.shift();
+  if (!lastMsgs.some(x => x.id === m.id)) {
+    lastMsgs.push(m);
+    if (lastMsgs.length > 300) lastMsgs.shift();
+  }
   const mine = m.uid === store.uid;
   if (!mine && Notify.active() && (document.hidden || document.hasFocus() === false)) Notify.play();
   appendMsg(m, mine);
@@ -480,7 +511,7 @@ socket.on('system', m => {
   if (m.kind === 'delete') setTimeout(() => location.href = '/private', 1600);
 });
 socket.on('typing', ({ name, typing }) => {
-  $('#typingInd').textContent = typing ? name + ' يكتب…' : '';
+  $('#typingInd').textContent = typing ? name + ' is typing…' : '';
 });
 /* new activity in the public chat while you're elsewhere */
 socket.on('public_activity', () => {
@@ -497,3 +528,4 @@ if (location.hash.length > 1) {
 }
 renderMyRooms();
 renderUnread();
+ensureName();

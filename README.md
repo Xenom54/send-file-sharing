@@ -1,7 +1,10 @@
 # 📨 Send — file / message sharing site + admin panel + private chat
 
+> 👑 **Crafted by Qai9rr**
+
 A self-hosted Node.js site to share **text, files, images and voice recordings**, with a hidden
-**admin panel** (visitor + IP logs, recycle bin) and **private chat rooms**. Dark premium UI.
+**admin panel** (visitor + IP logs, recycle bin), **private chat rooms** and **Kali**,
+a real AI bot (Google Gemini). Dark premium UI, English throughout.
 
 ## ▶️ Run locally
 

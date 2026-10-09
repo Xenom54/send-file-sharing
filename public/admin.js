@@ -69,8 +69,6 @@ async function loadAiBox() {
   try {
     const s = await (await fetch('/api/admin/stats')).json();
     const aiRows = [
-      ['😏 Funny replies', s.aiMode0],
-      ['🌑 Mysterious replies', s.aiMode1],
       ['🤖 Total replies', s.aiReplies],
       ['💬 Mentions of the bot', s.aiMentions],
       ['🛋️ 1-on-1 AI chats', s.aiRooms],
@@ -325,7 +323,7 @@ async function loadKaliConfig() {
     $('#kaliSystem').value = c.system || '';
     $('#kaliEnabled').checked = !!c.enabled;
     const state = $('#kaliState');
-    state.textContent = !c.enabled ? 'معطّل' : (c.hasKey ? `شغال · ${c.model}` : 'بدون مفتاح — ردود احتياطية');
+    state.textContent = !c.enabled ? 'disabled' : (c.hasKey ? `on · ${c.model}` : 'no key — fallback replies');
     state.className = 'pill ' + (!c.enabled ? '' : c.hasKey ? 'ok' : 'bad');
   } catch { /* ignore */ }
 }
@@ -334,8 +332,8 @@ $('#btnSaveKali').addEventListener('click', async () => {
   const r = await fetch('/api/admin/kali-config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
-  if (r.ok) { toast('✓ حفظت شخصية كالي'); loadKaliConfig(); }
-  else toast('⚠ فشل الحفظ', 'err');
+  if (r.ok) { toast('✓ Kali personality saved'); loadKaliConfig(); }
+  else toast('⚠ Save failed', 'err');
 });
 
 /* --------------------------------- TABS ---------------------------------- */

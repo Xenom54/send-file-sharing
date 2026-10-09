@@ -11,6 +11,10 @@ const backup = require('./github-backup');
 const mega = require('./mega-backup');
 const kali = require('./kali');
 
+/* never let a single error kill the whole process and kick everyone out */
+process.on('uncaughtException', e => console.error('[uncaught]', e && e.stack ? e.stack.split('\n')[0] + ' @ ' + (e.stack.split('\n')[1] || '').trim() : e));
+process.on('unhandledRejection', e => console.error('[unhandled]', e && e.message ? e.message : e));
+
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
@@ -450,17 +454,14 @@ app.post('/api/admin/password', requireAdmin, (req, res) => {
 
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
   let totalMessages = 0, lastActivity = 0;
-  let aiReplies = 0, aiMode0 = 0, aiMode1 = 0, aiLast = 0, aiRooms = 0, aiMentions = 0;
+  let aiReplies = 0, aiLast = 0, aiRooms = 0, aiMentions = 0;
   for (const [rname, list] of Object.entries(chats)) {
     totalMessages += list.length;
     if (list.length) { const ts = list[list.length - 1].ts; if (ts > lastActivity) lastActivity = ts; }
     if (rname.startsWith('ai-')) aiRooms++;
     for (const m of list) {
-      if (m.bot) {
-        aiReplies++;
-        if (m.mode === 1) aiMode1++; else aiMode0++;
-        if (m.ts > aiLast) aiLast = m.ts;
-      } else if (/@ai/i.test(String(m.text || ''))) aiMentions++;
+      if (m.bot) { aiReplies++; if (m.ts > aiLast) aiLast = m.ts; }
+      else if (/@kali/i.test(String(m.text || ''))) aiMentions++;
     }
   }
   const onlineNow = Object.values(presence).reduce((n, m) => n + m.size, 0);
@@ -479,7 +480,7 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
     onlineNow,
     chatVisitors: uniqueVisitors.size,
     uniqueIps: uniqueIps.size,
-    aiReplies, aiMode0, aiMode1, aiRooms, aiMentions, aiLast,
+    aiReplies, aiRooms, aiMentions, aiLast,
     lastActivity,
     lastVisit: logs.length ? logs[0].ts : 0,
   });
@@ -586,7 +587,7 @@ const server = http.createServer(app);
 server.requestTimeout = 0;
 server.headersTimeout = 0;
 server.keepAliveTimeout = 0;
-const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024 });
+const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024, pingTimeout: 30000, pingInterval: 10000 });
 
 function roomName(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40); }
 
@@ -754,8 +755,10 @@ function maybeKaliReply(room, userName, text, reqLike) {
 
 io.on('connection', (socket) => {
   let room = null, name = 'anonymous', isPrivateAdmin = false;
+  const reqLike = () => ({ headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
 
-  socket.on('join', ({ room: r, name: n, pw, uid: u }, ack) => {
+  socket.on('join', (data, ack) => {
+    try {
     // leave any previous room first (so switching rooms doesn't double-connect)
     if (socket.data.room && socket.data.room !== room) {
       const old = socket.data.room;
@@ -763,10 +766,10 @@ io.on('connection', (socket) => {
       if (presence[old]) presence[old].delete(socket.id);
       emitPresenceToAdmins(old);
     }
-    room = roomName(r);
-    name = String(n || 'anonymous').slice(0, 30);
-    const uid = String(u || '').slice(0, 64);
-    isPrivateAdmin = requirePrivateAdminPw(pw);
+    room = roomName(data?.room);
+    name = String(data?.name || 'anonymous').slice(0, 30);
+    const uid = String(data?.uid || '').slice(0, 64);
+    isPrivateAdmin = requirePrivateAdminPw(data?.pw);
     if (!room) { socket.emit('system', { ts: Date.now(), text: 'invalid room' }); return; }
     socket.join(room);
     socket.data.room = room; socket.data.name = name; socket.data.uid = uid; socket.data.admin = isPrivateAdmin;
@@ -783,65 +786,74 @@ io.on('connection', (socket) => {
     // private admins enter privately everywhere except the public chat
     const stealth = isPrivateAdmin && room !== 'public';
     if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
-    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}`, reqLike());
     if (ack) ack({ ok: true, admin: isPrivateAdmin });
+    } catch (e) { console.error('[io join]', e.message); }
   });
 
-  socket.on('msg', ({ text, image, replyTo }) => {
+  socket.on('msg', (data) => {
+    try {
     if (!room) return;
-    const t = String(text || '').slice(0, 4000);
-    const img = String(image || '').slice(0, 2000);
+    const t = String(data?.text || '').slice(0, 4000);
+    const img = String(data?.image || '').slice(0, 2000);
     if (!t.trim() && !img) return;
     const msg = { ts: Date.now(), name, text: t, id: newId(), uid: socket.data.uid };
     if (img) msg.image = img;
     if (isPrivateAdmin) msg.admin = true;
-    if (replyTo && typeof replyTo === 'string') {
-      const orig = (chats[room] || []).find(m => m.id === replyTo);
+    if (data?.replyTo && typeof data.replyTo === 'string') {
+      const orig = (chats[room] || []).find(m => m.id === data.replyTo);
       if (orig) msg.replyTo = { id: orig.id, name: orig.name, text: String(orig.text || '').slice(0, 80) };
     }
     saveChat(room, msg);
     io.to(room).emit('msg', msg);
     if (room === 'public') io.emit('public_activity', { room });
-    const reqLike = { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } };
-    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}${msg.replyTo ? ' +reply' : ''}`, reqLike);
-    maybeKaliReply(room, name, t, reqLike);
+    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}${msg.replyTo ? ' +reply' : ''}`, reqLike());
+    maybeKaliReply(room, name, t, reqLike());
+    } catch (e) { console.error('[io msg]', e.message); }
   });
 
   /* edit your own text message (admins can edit any non-bot message) */
-  socket.on('editmsg', ({ id, text }) => {
+  socket.on('editmsg', (data) => {
+    try {
     if (!room) return;
     const list = chats[room] || [];
-    const m = list.find(x => x.id === id);
+    const m = list.find(x => x.id === data?.id);
     if (!m || m.bot || m.image) return;
     if (!isPrivateAdmin && m.uid !== socket.data.uid) return;
-    const t = String(text || '').slice(0, 4000);
+    const t = String(data?.text || '').slice(0, 4000);
     if (!t.trim()) return;
     m.text = t;
     m.edited = true;
     saveChats();
-    io.to(room).emit('editmsg', { id, text: t, edited: true });
-    log('chat_msg_edit', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+    io.to(room).emit('editmsg', { id: m.id, text: t, edited: true });
+    log('chat_msg_edit', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, reqLike());
+    } catch (e) { console.error('[io editmsg]', e.message); }
   });
 
   /* delete a single message: own messages always; any message if private admin */
-  socket.on('delmsg', ({ id }) => {
+  socket.on('delmsg', (data) => {
+    try {
     if (!room) return;
     const list = chats[room] || [];
-    const i = list.findIndex(m => m.id === id);
+    const i = list.findIndex(m => m.id === data?.id);
     if (i === -1) return;
     if (!isPrivateAdmin && list[i].uid !== socket.data.uid) return;
     list.splice(i, 1);
     saveChats();
-    io.to(room).emit('delmsg', { id });
-    log('chat_msg_del', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+    io.to(room).emit('delmsg', { id: data.id });
+    log('chat_msg_del', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, reqLike());
+    } catch (e) { console.error('[io delmsg]', e.message); }
   });
 
   socket.on('typing', (isTyping) => {
+    try {
     if (!room) return;
     socket.to(room).emit('typing', { name, typing: !!isTyping });
+    } catch (e) { console.error('[io typing]', e.message); }
   });
 
   socket.on('disconnect', () => {
+    try {
     if (room) {
       if (presence[room]) presence[room].delete(socket.id);
       emitPresenceToAdmins(room);
@@ -849,6 +861,7 @@ io.on('connection', (socket) => {
       const stealth = isPrivateAdmin && room !== 'public';
       if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
     }
+    } catch (e) { console.error('[io disconnect]', e.message); }
   });
 });
 
