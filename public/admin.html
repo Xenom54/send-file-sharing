@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=5">
+  <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
   <nav class="navbar">
@@ -165,10 +165,30 @@
           <p class="small muted mt">Used for the hidden <code>/privateadmin</code> chat moderation panel.</p>
         </div>
       </div>
+
+      <div class="card pane-card" style="margin-top:18px">
+        <div class="pane-head">
+          <span class="pane-ic">✨</span> كالي (Kali) — شخصية البوت وأوامره
+          <span class="spacer"></span>
+          <span class="pill" id="kaliState">…</span>
+        </div>
+        <div class="field">
+          <label class="fl">الشخصية / الأوامر (system prompt)</label>
+          <textarea id="kaliSystem" dir="auto" style="min-height:130px" placeholder="مثال: ترد بالعربي، بس ما تستخدم إيموجيات أبداً، وكن حاد وساخر"></textarea>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:7px;font-size:.88rem;font-weight:650;cursor:pointer">
+            <input type="checkbox" id="kaliEnabled" style="width:auto"> البوت مفعّل
+          </label>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn primary" id="btnSaveKali">حفظ الشخصية</button>
+        </div>
+        <p class="small muted mt">اكتب أوامرك مباشرة في الشخصية — مثلاً: «لا تستخدم إيموجيات» أو «كن جاداً دائماً». التعديل يسري فوراً على كل الغرف.</p>
+      </div>
     </div>
   </div>
 
   <div class="toasts" id="toasts"></div>
-  <script src="/static/admin.js?v=5"></script>
+  <script src="/static/admin.js?v=6"></script>
 </body>
 </html>

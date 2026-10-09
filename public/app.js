@@ -85,7 +85,7 @@ function itemHTML(it, i) {
   const url = '/uploads/' + encodeURIComponent(it.fileName);
   let body = '';
   if (it.type === 'text') {
-    body = `<div class="text-body">${esc(it.text)}</div>`;
+    body = `<div class="text-body" dir="auto">${esc(it.text)}</div>`;
   } else if (it.type === 'image') {
     body = `<img loading="lazy" src="${url}" alt="${esc(it.title)}" data-full="${url}" class="zoomable">`;
   } else if (it.type === 'audio') {
@@ -102,10 +102,11 @@ function itemHTML(it, i) {
   if (it.type === 'image') actions += `<button class="btn small" data-copy-img="${url}">⧉ Copy image</button>`;
   actions += `<a class="btn small" href="${url}?download=1" download>⬇ Download${it.downloads ? ` · ${it.downloads}` : ''}</a>`;
   actions += `<button class="btn small danger" data-del="${it.id}" title="Delete">🗑</button>`;
+  if (it.type === 'text') actions += `<button class="btn small" data-edit-item="${it.id}" title="Edit">✎</button>`;
 
   return `<div class="card item hoverable" id="item-${it.id}" style="animation-delay:${Math.min(i * 45, 400)}ms">
     <div class="meta"><span class="badge ${it.type}">${it.type}</span><span>${esc(fmtTime(it.createdAt))}</span>${it.size ? `<span>· ${fmtSize(it.size)}</span>` : ''}</div>
-    ${it.title ? `<h3>${esc(it.title)}</h3>` : ''}
+    ${it.title ? `<h3 dir="auto">${esc(it.title)}</h3>` : ''}
     ${body}
     <div class="item-actions">${actions}</div>
   </div>`;
@@ -167,11 +168,12 @@ $('#items').addEventListener('click', e => {
   const ct = e.target.closest('[data-copy-text]'); if (ct) return copyText(ct.dataset.copyText);
   const ci = e.target.closest('[data-copy-img]'); if (ci) return copyImage(ci.dataset.copyImg);
   const dl = e.target.closest('[data-del]'); if (dl) return delItem(dl.dataset.del);
+  const ed = e.target.closest('[data-edit-item]'); if (ed) return openEditModal(ed.dataset.editItem);
   const img = e.target.closest('.zoomable');
   if (img) { $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); }
 });
 $('#lightbox').addEventListener('click', () => $('#lightbox').classList.remove('open'));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#lightbox').classList.remove('open'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#lightbox').classList.remove('open'); $('#editModal').classList.remove('open'); } });
 
 async function delItem(id) {
   if (isAdmin) return doDelete(id);
@@ -395,5 +397,72 @@ async function saveRec() {
   } catch { toast('⚠ Failed to save recording', 'err'); }
   btn.disabled = false; btn.textContent = '💾 Save recording';
 }
+
+/* ------------------------- edit text items (admin) ------------------------- */
+let editingId = null;
+function openEditModal(id) {
+  const it = items.find(x => x.id === id);
+  if (!it || it.type !== 'text') return;
+  editingId = id;
+  $('#editTitle').value = it.title || '';
+  $('#editText').value = it.text || '';
+  $('#editError').textContent = '';
+  $('#editPw').value = '';
+  $('#editPwField').classList.toggle('hidden', isAdmin);
+  $('#editModal').classList.add('open');
+  setTimeout(() => $('#editTitle').focus(), 60);
+}
+$('#editCancel').addEventListener('click', () => { $('#editModal').classList.remove('open'); editingId = null; });
+$('#editModal').addEventListener('click', e => { if (e.target.id === 'editModal') { $('#editModal').classList.remove('open'); editingId = null; } });
+
+$('#editSave').addEventListener('click', async () => {
+  if (!editingId) return;
+  const btn = $('#editSave');
+  btn.disabled = true;
+  try {
+    // if not admin yet, try to log in first with the typed password
+    if (!isAdmin) {
+      const pw = $('#editPw').value;
+      if (!pw) { $('#editError').textContent = 'اكتب باسورد الأدمن'; btn.disabled = false; return; }
+      const lr = await fetch('/api/admin/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (!lr.ok) { $('#editError').textContent = 'باسورد غلط'; btn.disabled = false; return; }
+      isAdmin = true;
+      $('#editPwField').classList.add('hidden');
+    }
+    const r = await fetch('/api/items/' + editingId + '/text', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: $('#editTitle').value, text: $('#editText').value }),
+    });
+    if (r.ok) {
+      toast('✓ تم التعديل');
+      $('#editModal').classList.remove('open');
+      editingId = null;
+      load();
+    } else {
+      const d = await r.json().catch(() => ({}));
+      $('#editError').textContent = d.error || 'فشل التعديل';
+    }
+  } catch { $('#editError').textContent = 'فشل الاتصال'; }
+  btn.disabled = false; btn.textContent = 'حفظ';
+});
+
+/* ---------------- site notifications (uploads + public chat dot) ---------------- */
+const siteSocket = io({ transports: ['websocket', 'polling'] });
+siteSocket.on('site_activity', ({ kind }) => {
+  if (!Notify.active()) return;
+  Notify.play();
+  if (kind === 'upload' && (document.hidden || !document.hasFocus())) load();
+});
+siteSocket.on('public_activity', () => {
+  const nav = $('#navChat');
+  if (nav) {
+    nav.innerHTML = '💬 Chat <span class="nav-dot"></span>';
+    if (Notify.active() && !document.hasFocus()) Notify.play();
+  }
+});
 
 load();

@@ -9,7 +9,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const backup = require('./github-backup');
 const mega = require('./mega-backup');
-const aiBot = require('./ai-bot');
+const kali = require('./kali');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
@@ -281,6 +281,7 @@ app.post('/api/items/text', (req, res) => {
   if (!text.trim() && !title.trim()) return res.status(400).json({ error: 'empty' });
   const it = { id: newId(), type: 'text', title, text, createdAt: Date.now(), ip: req.ip, downloads: 0, deleted: false };
   items.push(it); saveItems();
+  io.emit('site_activity', { kind: 'upload' });
   log('upload', `text note: ${title || '(untitled)'}`, req);
   res.json(publicItem(it));
 });
@@ -515,6 +516,33 @@ app.post('/api/admin/privateadmin-password', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+/* Kali (AI bot) configuration: personality + on/off (admin-editable) */
+app.get('/api/admin/kali-config', requireAdmin, (req, res) => res.json(kali.getConfig()));
+app.post('/api/admin/kali-config', requireAdmin, (req, res) => {
+  const next = kali.setConfig({ system: req.body?.system, enabled: req.body?.enabled });
+  backupPush('data', 'kali.json');
+  megaPush('data', 'kali.json');
+  log('kali_config', 'Kali personality/settings updated', req);
+  res.json(next);
+});
+
+/* edit a text item's title/text */
+app.put('/api/items/:id/text', requireAdmin, (req, res) => {
+  const it = items.find(i => i.id === req.params.id);
+  if (!it) return res.status(404).json({ error: 'not found' });
+  if (it.type !== 'text') return res.status(400).json({ error: 'only text items can be edited' });
+  const title = String(req.body?.title || '').slice(0, 200);
+  const text = String(req.body?.text || '').slice(0, 100000);
+  if (!title.trim() && !text.trim()) return res.status(400).json({ error: 'empty' });
+  it.title = title;
+  it.text = text;
+  it.edited = true;
+  saveItems();
+  io.emit('site_activity', { kind: 'edit' });
+  log('item_edit', `text note: ${title || '(untitled)'}`, req);
+  res.json(publicItem(it));
+});
+
 /* ---------------------------- private chat (io) --------------------------- */
 function chatHistory(room) {
   return (chats[room] || []).slice(-200);
@@ -700,30 +728,28 @@ function recordVisit(room, name, uid, isAdmin, ip) {
 }
 function requirePrivateAdminPw(pw) { return String(pw || '') === PRIVATE_ADMIN_PASSWORD && !!PRIVATE_ADMIN_PASSWORD; }
 
-/* ------------------------------- AI chat bot -------------------------------
-   Present in every room. Replies when mentioned (@ai / @ai0 funny, @ai1 mysterious).
-   Rooms named `ai-<uid>` are 1-on-1 chats where it replies to every message. */
-const aiLastMode = new Map();
-function maybeAiReply(room, userName, uid, text, reqLike) {
-  const isAiRoom = room && room.startsWith('ai-');
-  const m = /@ai(0|1)?/i.exec(String(text || ''));
-  let mode = m ? (m[1] === '1' ? 1 : 0) : null;
-  if (!isAiRoom && mode === null) return; // no mention outside AI rooms
-  if (mode === null) mode = aiLastMode.get(uid) ?? 0; // in AI rooms: remember last mode
-  aiLastMode.set(uid, mode);
-  const prompt = String(text || '').replace(/@ai(0|1)?/gi, '').trim();
+/* ------------------------------- Kali — AI bot ------------------------------
+   One personality ("Kali"), powered by Gemini. Replies when mentioned (@kali)
+   in any room; rooms named `ai-<uid>` are 1-on-1 chats where it replies to all. */
+function maybeKaliReply(room, userName, text, reqLike) {
+  const isKaliRoom = room && room.startsWith('ai-');
+  const mentioned = /@(kali|ai)\b/i.test(String(text || ''));
+  if (!isKaliRoom && !mentioned) return; // only mentions outside Kali rooms
+  const prompt = String(text || '').replace(/@(kali|ai)\b/gi, '').trim();
 
-  setTimeout(() => {
+  // short natural delay, then ask Gemini with the room's recent context
+  setTimeout(async () => {
     try {
-      const msg = {
-        ts: Date.now(), name: 'AI', text: aiBot.reply(mode, prompt, userName),
-        id: newId(), uid: 'bot', bot: true, mode,
-      };
+      const history = (chats[room] || []).slice(-10).map(m => ({ name: m.name, text: m.text, bot: !!m.bot }));
+      const text = await kali.reply(prompt, userName, history);
+      if (!text) return; // bot disabled by admin
+      const msg = { ts: Date.now(), name: 'Kali', text: String(text).slice(0, 1500), id: newId(), uid: 'bot', bot: true };
       saveChat(room, msg);
       io.to(room).emit('msg', msg);
-      log('ai_msg', `room=${room} mode=${mode}`, reqLike);
-    } catch (e) { console.error('[ai] reply failed', e.message); }
-  }, 700 + Math.floor(Math.random() * 900));
+      if (room === 'public') io.emit('public_activity', { room });
+      log('ai_msg', `room=${room}`, reqLike);
+    } catch (e) { console.error('[kali] reply failed', e.message); }
+  }, 400 + Math.floor(Math.random() * 500));
 }
 
 io.on('connection', (socket) => {
@@ -754,12 +780,14 @@ io.on('connection', (socket) => {
 
     socket.emit('history', chatHistory(room));
     socket.emit('role', { admin: isPrivateAdmin, owner: !!roomOwners[room] });
-    io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
-    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+    // private admins enter privately everywhere except the public chat
+    const stealth = isPrivateAdmin && room !== 'public';
+    if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
+    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
     if (ack) ack({ ok: true, admin: isPrivateAdmin });
   });
 
-  socket.on('msg', ({ text, image }) => {
+  socket.on('msg', ({ text, image, replyTo }) => {
     if (!room) return;
     const t = String(text || '').slice(0, 4000);
     const img = String(image || '').slice(0, 2000);
@@ -767,11 +795,32 @@ io.on('connection', (socket) => {
     const msg = { ts: Date.now(), name, text: t, id: newId(), uid: socket.data.uid };
     if (img) msg.image = img;
     if (isPrivateAdmin) msg.admin = true;
+    if (replyTo && typeof replyTo === 'string') {
+      const orig = (chats[room] || []).find(m => m.id === replyTo);
+      if (orig) msg.replyTo = { id: orig.id, name: orig.name, text: String(orig.text || '').slice(0, 80) };
+    }
     saveChat(room, msg);
     io.to(room).emit('msg', msg);
+    if (room === 'public') io.emit('public_activity', { room });
     const reqLike = { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } };
-    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}`, reqLike);
-    maybeAiReply(room, name, socket.data.uid, t, reqLike);
+    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}${msg.replyTo ? ' +reply' : ''}`, reqLike);
+    maybeKaliReply(room, name, t, reqLike);
+  });
+
+  /* edit your own text message (admins can edit any non-bot message) */
+  socket.on('editmsg', ({ id, text }) => {
+    if (!room) return;
+    const list = chats[room] || [];
+    const m = list.find(x => x.id === id);
+    if (!m || m.bot || m.image) return;
+    if (!isPrivateAdmin && m.uid !== socket.data.uid) return;
+    const t = String(text || '').slice(0, 4000);
+    if (!t.trim()) return;
+    m.text = t;
+    m.edited = true;
+    saveChats();
+    io.to(room).emit('editmsg', { id, text: t, edited: true });
+    log('chat_msg_edit', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
   });
 
   /* delete a single message: own messages always; any message if private admin */
@@ -796,7 +845,9 @@ io.on('connection', (socket) => {
     if (room) {
       if (presence[room]) presence[room].delete(socket.id);
       emitPresenceToAdmins(room);
-      io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
+      // stealth: private admins leave silently too (except in the public chat)
+      const stealth = isPrivateAdmin && room !== 'public';
+      if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
     }
   });
 });
@@ -809,6 +860,7 @@ const RESTORE_DATA_FILES = [
   ['owners.json', paths.owners],
   ['visitors.json', paths.visitors],
   ['privateadmin.json', paths.privateadmin],
+  ['kali.json', path.join(DATA_DIR, 'kali.json')],
 ];
 
 /* MEGA first (full fidelity), GitHub fills any still-missing files */
@@ -885,6 +937,7 @@ async function backupRestoreUploads() {
 (async function boot() {
   backup.setup();
   mega.setup();
+  kali.setup();
 
   const localItems = readJSON(paths.items, []);
   if (!Array.isArray(localItems) || localItems.length === 0) {
@@ -920,5 +973,7 @@ async function backupRestoreUploads() {
     console.log(`Private-admin password: ${PRIVATE_ADMIN_PASSWORD}${process.env.PRIVATE_ADMIN_PASSWORD ? ' (from env)' : ' — set PRIVATE_ADMIN_PASSWORD env to change'}`);
     console.log(mega.configured() ? 'MEGA backup: ENABLED (push on change + restore when empty)' : 'MEGA backup: not configured');
     console.log(backup.configured() ? 'GitHub backup: ENABLED (push on change + restore when empty)' : 'GitHub backup: not configured');
+    const kc = kali.getConfig();
+    console.log(`Kali bot: ${!kc.enabled ? 'disabled by admin' : kc.hasKey ? 'ENABLED (Gemini · ' + kc.model + ')' : 'fallback mode (no API key set)'}`);
   });
 })();

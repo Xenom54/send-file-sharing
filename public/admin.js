@@ -318,6 +318,26 @@ $('#btnChangePrivateAdminPw').addEventListener('click', async () => {
   }
 });
 
+/* ---------------------------- Kali bot settings ---------------------------- */
+async function loadKaliConfig() {
+  try {
+    const c = await (await fetch('/api/admin/kali-config')).json();
+    $('#kaliSystem').value = c.system || '';
+    $('#kaliEnabled').checked = !!c.enabled;
+    const state = $('#kaliState');
+    state.textContent = !c.enabled ? 'معطّل' : (c.hasKey ? `شغال · ${c.model}` : 'بدون مفتاح — ردود احتياطية');
+    state.className = 'pill ' + (!c.enabled ? '' : c.hasKey ? 'ok' : 'bad');
+  } catch { /* ignore */ }
+}
+$('#btnSaveKali').addEventListener('click', async () => {
+  const body = { system: $('#kaliSystem').value, enabled: $('#kaliEnabled').checked };
+  const r = await fetch('/api/admin/kali-config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (r.ok) { toast('✓ حفظت شخصية كالي'); loadKaliConfig(); }
+  else toast('⚠ فشل الحفظ', 'err');
+});
+
 /* --------------------------------- TABS ---------------------------------- */
 function switchTab(atab) {
   $$('#adminTabs .tab').forEach(x => x.classList.toggle('active', x.dataset.atab === atab));
@@ -327,6 +347,7 @@ function switchTab(atab) {
   if (atab === 'visitors') loadIps();
   if (atab === 'items') loadAll();
   if (atab === 'trash') loadTrash();
+  if (atab === 'settings') loadKaliConfig();
 }
 $$('#adminTabs .tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.atab)));
 $$('[data-atab-go]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); switchTab(a.dataset.atabGo); }));

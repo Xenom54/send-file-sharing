@@ -171,10 +171,13 @@ function appendMsg(m) {
   el.dataset.mid = m.id;
   const img = m.image
     ? `<a href="${esc(m.image)}" target="_blank"><img src="${esc(m.image)}" alt="image" class="chat-img"></a>` : '';
-  const txt = m.text ? `<div class="msg-text">${esc(m.text)}</div>` : '';
-  const who = m.bot ? `🤖 AI ${m.mode === 1 ? '🌑' : '😏'}` : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}`;
+  const quote = m.replyTo
+    ? `<div class="reply-quote" dir="auto"><b>${esc(m.replyTo.name)}</b><br>${esc(m.replyTo.text)}</div>` : '';
+  const txt = m.text
+    ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(معدّلة)</span>' : ''}</div>` : '';
+  const who = m.bot ? 'Kali' : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}`;
   el.innerHTML = `<div class="who">${who}</div>
-    <div class="bubble">${img}${txt}<button class="msg-del" data-del="${m.id}" title="Delete message">✕</button></div>
+    <div class="bubble">${img}${quote}${txt}<button class="msg-act msg-del" data-del="${m.id}" title="حذف">✕</button></div>
     <div class="time">${esc(fmtTime(m.ts))}</div>`;
   $('#viewMessages').appendChild(el);
   $('#viewMessages').scrollTop = $('#viewMessages').scrollHeight;
@@ -200,6 +203,15 @@ socket.on('history', list => {
   $('#viewMsgs').textContent = `${(list || []).length} messages`;
 });
 socket.on('msg', appendMsg);
+socket.on('editmsg', ({ id, text }) => {
+  const el = $('#viewMessages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
+  if (!el) return;
+  const t = el.querySelector('.msg-text');
+  if (t) {
+    t.textContent = text;
+    if (!t.querySelector('.edited-tag')) t.insertAdjacentHTML('beforeend', '<span class="edited-tag">(معدّلة)</span>');
+  }
+});
 socket.on('system', m => { appendSys(m); if (m.kind === 'delete') $('#btnBack').click(); if (m.kind === 'join' || m.kind === 'leave') loadVisitors(currentRoom); });
 socket.on('delmsg', ({ id }) => {
   const el = $('#viewMessages').querySelector(`[data-mid="${CSS.escape(id)}"]`);

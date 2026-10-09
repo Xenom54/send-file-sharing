@@ -6,13 +6,14 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Chat</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-inner">
       <a class="brand" href="/"><span class="logo">📨</span><span class="name">Send</span></a>
       <div class="nav-links">
+        <span class="nav-bell" id="btnBell">🔔<span class="bell-label"></span></span>
         <a href="/">← Home</a>
         <a href="/private" class="active">Chat</a>
       </div>
@@ -22,20 +23,29 @@
   <!-- gate -->
   <div class="card gate" id="gate">
     <h2>💬 Chat</h2>
-    <div class="sub">Join the public chat, or create a private room and share its code.</div>
+    <div class="sub">اختر محادثة، أو أنشئ غرفة خاصة وشارك كودها.</div>
 
     <div class="field">
-      <label class="fl">Your name</label>
-      <input type="text" id="gateName" placeholder="e.g. Alex" maxlength="30">
+      <label class="fl">اسمك</label>
+      <input type="text" id="gateName" placeholder="مثلاً: محمد" maxlength="30" dir="auto">
     </div>
 
-    <button class="btn primary" id="btnPublic" style="width:100%;font-size:1rem">🌍 Join the public chat</button>
+    <div class="gate-actions">
+      <button class="gate-action" id="btnPublic">
+        <span class="ga-ic">🌍</span>
+        <span><span class="ga-t">الشات العام <span class="nav-dot hidden" id="dotPublicGate"></span></span><br><span class="ga-s">للجميع</span></span>
+      </button>
+      <button class="gate-action" id="btnKali">
+        <span class="ga-ic">✨</span>
+        <span><span class="ga-t">كالي Kali <span class="nav-dot hidden" id="dotKaliGate"></span></span><br><span class="ga-s">محادثتك الخاصة معه</span></span>
+      </button>
+    </div>
 
-    <div class="or-divider">or create / join a private room</div>
-    <button class="btn" id="btnCreate" style="width:100%">✨ Create a new private room</button>
+    <div class="or-divider">غرفة خاصة</div>
+    <button class="btn" id="btnCreate" style="width:100%">✨ إنشاء غرفة جديدة</button>
     <div class="row mt">
-      <input type="text" id="gateRoom" placeholder="room code" maxlength="40" style="text-transform:lowercase" autocomplete="off">
-      <button class="btn" id="btnJoin">Join</button>
+      <input type="text" id="gateRoom" placeholder="كود الغرفة" maxlength="40" style="text-transform:lowercase" autocomplete="off" dir="auto">
+      <button class="btn" id="btnJoin">دخول</button>
     </div>
     <div id="myRooms" style="margin-top:20px"></div>
   </div>
@@ -44,24 +54,23 @@
   <div class="wrap hidden" id="chatWrap">
     <div class="chat-app">
       <div class="card panel">
-        <div class="ph">Rooms</div>
+        <div class="ph">المحادثات</div>
         <button class="room-item" id="roomPublic" data-goto="public">
-          <span>🌍 Public chat</span><span class="code">everyone</span>
+          <span><span class="unread-dot hidden" id="dotPublic"></span> 🌍 الشات العام</span><span class="code">للجميع</span>
         </button>
-        <button class="room-item" id="roomAi" style="margin-top:8px">
-          <span>🤖 AI bot</span><span class="code">لحالك</span>
+        <button class="room-item" id="roomKali" style="margin-top:8px">
+          <span><span class="unread-dot hidden" id="dotKali"></span> ✨ كالي</span><span class="code">لحالك</span>
         </button>
         <div class="room-list" id="roomList" style="margin-top:8px"></div>
-        <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ New private room</button>
+        <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ غرفة خاصة جديدة</button>
 
-        <!-- AI hint -->
         <div class="small muted" style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;line-height:1.6">
-          ذكر البوت بأي غرفة: <b>@ai</b> مزح · <b>@ai1</b> غامض
+          نادِ كالي بأي غرفة: <b>@kali</b>
         </div>
 
         <!-- members panel: private admin only -->
         <div id="membersPanel" class="hidden" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
-          <div class="ph">👥 Online now <span class="pill ok" id="membersCount">0</span></div>
+          <div class="ph">👥 المتصلون الآن <span class="pill ok" id="membersCount">0</span></div>
           <div class="member-list" id="membersList"></div>
         </div>
       </div>
@@ -71,18 +80,22 @@
           <span class="hash">#</span><span class="room-title" id="roomTitle">—</span>
           <span id="adminBadge" class="badge text hidden">private admin</span>
           <span class="right">
-            <button class="btn small danger" id="btnDeleteRoom" title="Delete this room">🗑 Delete room</button>
-            <button class="btn small" id="btnShare" title="Share room link">🔗 Share</button>
+            <button class="btn small danger" id="btnDeleteRoom" title="Delete this room">🗑</button>
+            <button class="btn small" id="btnShare" title="Share room link">🔗</button>
             <button class="btn small ghost" id="btnAdminUnlock" title="Admin mode">🛡️</button>
-            <button class="btn small ghost" id="btnLeave">Leave</button>
+            <button class="btn small ghost" id="btnLeave">خروج</button>
           </span>
         </div>
         <div class="messages" id="messages"></div>
         <div class="typing-ind" id="typingInd"></div>
+        <div class="reply-bar" id="replyBar">
+          <span class="rb-text" id="replyBarText"></span>
+          <button class="btn small ghost" id="replyCancel">✕</button>
+        </div>
         <div class="chat-input">
           <button class="btn icon" id="btnImage" title="Send an image">🖼️</button>
-          <input type="text" id="msgInput" placeholder="Type a message…" autocomplete="off" maxlength="4000">
-          <button class="btn primary" id="btnSend">Send</button>
+          <input type="text" id="msgInput" placeholder="اكتب رسالة…" autocomplete="off" maxlength="4000" dir="auto">
+          <button class="btn primary" id="btnSend">إرسال</button>
           <input type="file" id="imageInput" accept="image/*" hidden>
         </div>
       </div>
@@ -93,19 +106,20 @@
   <div class="lightbox" id="adminModal">
     <div class="card" style="max-width:400px;width:calc(100% - 32px);padding:26px;text-align:center">
       <div class="lock-ic" style="margin-bottom:14px">🛡️</div>
-      <h3 style="font-size:1.1rem;font-weight:800">Admin mode</h3>
-      <p class="small muted" style="margin:8px 0 16px;line-height:1.5">Enter the private-admin password to see who's online in this room and unlock moderation tools.</p>
-      <input type="password" id="adminPwInput" placeholder="Private-admin password" autocomplete="off" style="text-align:left">
+      <h3 style="font-size:1.1rem;font-weight:800">وضع الأدمن</h3>
+      <p class="small muted" style="margin:8px 0 16px;line-height:1.5">أدخل باسورد البرايفت أدمن لعرض المتصلين وأدوات الإشراف.</p>
+      <input type="password" id="adminPwInput" placeholder="باسورد البرايفت أدمن" autocomplete="off" style="text-align:left">
       <div class="small" id="adminPwError" style="color:var(--danger);margin-top:8px;min-height:16px;font-weight:600"></div>
       <div style="display:flex;gap:10px;margin-top:12px">
-        <button class="btn" id="adminCancel" style="flex:1">Cancel</button>
-        <button class="btn primary" id="adminConfirm" style="flex:1">Unlock</button>
+        <button class="btn" id="adminCancel" style="flex:1">إلغاء</button>
+        <button class="btn primary" id="adminConfirm" style="flex:1">فتح</button>
       </div>
     </div>
   </div>
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/private.js?v=5"></script>
+  <script src="/static/notify.js?v=6"></script>
+  <script src="/static/private.js?v=6"></script>
 </body>
 </html>
