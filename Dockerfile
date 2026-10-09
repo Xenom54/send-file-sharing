@@ -11,6 +11,7 @@ COPY server.js ./
 COPY drive.js ./
 COPY github-backup.js ./
 COPY mega-backup.js ./
+COPY ai-bot.js ./
 COPY public ./public
 
 # persistent data volumes

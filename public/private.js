@@ -52,7 +52,7 @@ $('#myRooms').addEventListener('click', e => {
 });
 
 function addRoom(code) {
-  if (code === 'public') return;
+  if (code === 'public' || code.startsWith('ai-')) return;
   const rooms = store.rooms.filter(r => r !== code);
   rooms.unshift(code);
   store.rooms = rooms.slice(0, 12);
@@ -74,7 +74,11 @@ function renderRoomList() {
        <button class="room-x" data-remove="${esc(r)}" title="Remove from list">✕</button>
      </div>`).join('');
   $('#roomPublic').classList.toggle('active', currentRoom === 'public');
+  $('#roomAi').classList.toggle('active', !!currentRoom && currentRoom.startsWith('ai-'));
 }
+$('#roomAi').addEventListener('click', () => {
+  if (!currentRoom || !currentRoom.startsWith('ai-')) startChat('ai-' + store.uid);
+});
 $('#roomList').addEventListener('click', e => {
   const rm = e.target.closest('[data-remove]');
   if (rm) {
@@ -131,14 +135,18 @@ function joinRoom(code) {
   const name = store.name || 'anonymous';
   store.name = name;
   currentRoom = code;
-  iAmOwner = code === 'public' ? false : !!store.ownerToken(code);
-  $('#roomTitle').textContent = code;
-  $('#roomIcon').textContent = code === 'public' ? '🌍' : '💬';
+  const isAi = code.startsWith('ai-');
+  iAmOwner = (code === 'public' || isAi) ? false : !!store.ownerToken(code);
+  $('#roomTitle').textContent = isAi ? 'AI bot' : code;
+  $('#roomIcon').textContent = isAi ? '🤖' : (code === 'public' ? '🌍' : '💬');
   if (!iAmAdmin) $('#adminBadge').classList.add('hidden');
   $('#btnDeleteRoom').style.display = 'none';
   $('#messages').innerHTML = '';
   $('#msgInput').value = '';
   $('#typingInd').textContent = '';
+  $('#msgInput').placeholder = isAi
+    ? 'اكلم الـ AI… (جرب @ai1 للنمط الغامض)'
+    : 'Type a message… (@ai لمناداة البوت)';
   $('#membersPanel').classList.toggle('hidden', !iAmAdmin);
   const pw = sessionStorage.getItem('send_privateadmin_pw') || '';
   socket.emit('join', { room: code, name, uid: store.uid, pw }, (ack) => {
@@ -268,9 +276,10 @@ function bubbleHTML(m, mine) {
 
 function appendMsg(m, mine) {
   const el = document.createElement('div');
-  el.className = 'msg' + (mine ? ' mine' : '') + (m.admin ? ' admin-msg' : '');
+  el.className = 'msg' + (mine ? ' mine' : '') + (m.admin ? ' admin-msg' : '') + (m.bot ? ' bot-msg' : '');
   el.dataset.mid = m.id;
-  el.innerHTML = `<div class="who">${esc(m.name)}${m.admin ? ' 🛡️' : ''}${mine ? ' (you)' : ''}</div>
+  const whoTag = m.bot ? `🤖 AI ${m.mode === 1 ? '🌑' : '😏'}` : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}${mine ? ' (you)' : ''}`;
+  el.innerHTML = `<div class="who">${whoTag}</div>
     <div class="bubble">${bubbleHTML(m, mine)}</div>
     <div class="time">${esc(fmtTime(m.ts))}</div>`;
   $('#messages').appendChild(el);

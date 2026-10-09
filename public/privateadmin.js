@@ -55,23 +55,28 @@ async function loadDashboard() {
       ['Public chat msgs', s.publicMessages, '🌍'],
       ['Online now', s.onlineNow, '🟢'],
       ['Unique visitors', s.uniqueVisitors, '👥'],
+      ['AI replies', s.aiReplies, '🤖'],
+      ['1-on-1 AI chats', s.aiRooms, '🛋️'],
     ];
     $('#stats').innerHTML = cards.map(([k, v, ic]) =>
       `<div class="card stat hoverable"><span class="ic">${ic}</span><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join('');
 
     $('#roomCount').textContent = s.rooms.length + ' rooms';
-    $('#statsSub').textContent = `${s.onlineNow} online · ${s.totalMessages} messages · ${s.uniqueVisitors} unique visitors`;
+    $('#statsSub').textContent = `${s.onlineNow} online · ${s.totalMessages} messages · ${s.uniqueVisitors} visitors · 🤖 ${s.aiReplies} AI replies`;
 
     const sorted = s.rooms.slice().sort((a, b) => (b.online - a.online) || (b.messages - a.messages));
     $('#roomsGrid').innerHTML = sorted.length ? sorted.map(ro => {
       const isPublic = ro.isPublic;
+      const isAi = ro.isAi;
+      const badge = isPublic ? '<span class="badge text">public</span>' : isAi ? '<span class="badge audio">AI</span>' : '<span class="badge file">room</span>';
+      const icon = isPublic ? '🌍' : isAi ? '🤖' : '💬';
       return `
       <div class="card item hoverable">
         <div class="meta">
-          <span class="badge ${isPublic ? 'text' : 'file'}">${isPublic ? 'public' : 'room'}</span>
+          ${badge}
           ${ro.online > 0 ? `<span class="pill ok">${ro.online} online</span>` : '<span class="pill">empty</span>'}
         </div>
-        <h3>${isPublic ? '🌍' : '💬'} #${esc(ro.name)}</h3>
+        <h3>${icon} ${isAi ? 'AI chat' : '#' + esc(ro.name)}</h3>
         <div class="small muted" style="margin-top:2px">
           ${ro.messages} messages · ${ro.visitors} visitors<br>
           last activity ${esc(ago(ro.lastMsgTs))}
@@ -162,12 +167,13 @@ $('#viewInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.pr
 
 function appendMsg(m) {
   const el = document.createElement('div');
-  el.className = 'msg' + (m.admin ? ' admin-msg' : '');
+  el.className = 'msg' + (m.admin ? ' admin-msg' : '') + (m.bot ? ' bot-msg' : '');
   el.dataset.mid = m.id;
   const img = m.image
     ? `<a href="${esc(m.image)}" target="_blank"><img src="${esc(m.image)}" alt="image" class="chat-img"></a>` : '';
   const txt = m.text ? `<div class="msg-text">${esc(m.text)}</div>` : '';
-  el.innerHTML = `<div class="who">${esc(m.name)}${m.admin ? ' 🛡️' : ''}</div>
+  const who = m.bot ? `🤖 AI ${m.mode === 1 ? '🌑' : '😏'}` : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}`;
+  el.innerHTML = `<div class="who">${who}</div>
     <div class="bubble">${img}${txt}<button class="msg-del" data-del="${m.id}" title="Delete message">✕</button></div>
     <div class="time">${esc(fmtTime(m.ts))}</div>`;
   $('#viewMessages').appendChild(el);

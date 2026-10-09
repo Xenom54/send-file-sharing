@@ -48,8 +48,16 @@
         <button class="room-item" id="roomPublic" data-goto="public">
           <span>🌍 Public chat</span><span class="code">everyone</span>
         </button>
+        <button class="room-item" id="roomAi" style="margin-top:8px">
+          <span>🤖 AI bot</span><span class="code">لحالك</span>
+        </button>
         <div class="room-list" id="roomList" style="margin-top:8px"></div>
         <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ New private room</button>
+
+        <!-- AI hint -->
+        <div class="small muted" style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;line-height:1.6">
+          ذكر البوت بأي غرفة: <b>@ai</b> مزح · <b>@ai1</b> غامض
+        </div>
 
         <!-- members panel: private admin only -->
         <div id="membersPanel" class="hidden" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">

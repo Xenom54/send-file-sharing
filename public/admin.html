@@ -45,6 +45,7 @@
     <div class="tabs-admin" id="adminTabs">
       <button class="tab active" data-atab="overview">📊 Overview</button>
       <button class="tab" data-atab="logs">📜 Activity</button>
+      <button class="tab" data-atab="visitors">🌐 Visitors</button>
       <button class="tab" data-atab="items">📦 Items</button>
       <button class="tab" data-atab="trash">🗑️ Recycle bin <span id="trashCount"></span></button>
       <button class="tab" data-atab="settings">⚙️ Settings</button>
@@ -66,6 +67,37 @@
           <div class="pane-head"><span class="pane-ic">💬</span> Chat <span class="spacer"></span><a class="btn small" href="/privateadmin">Open →</a></div>
           <div id="chatBox" class="pane-list"></div>
         </div>
+      </div>
+
+      <div class="split-grid" style="margin-top:18px">
+        <!-- AI bot -->
+        <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">🤖</span> AI bot</div>
+          <div id="aiBox" class="pane-list"></div>
+        </div>
+
+        <!-- top visitors -->
+        <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">🏆</span> Top visitors <span class="spacer"></span><a class="btn small" href="#" data-atab-go="visitors">All →</a></div>
+          <div id="topIpsBox" class="pane-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ VISITORS (IPs) ============ -->
+    <div class="apane hidden" id="apane-visitors">
+      <div class="items-toolbar">
+        <div class="search-box">
+          <span class="search-ic">🔍</span>
+          <input type="text" id="ipSearch" placeholder="Search IP…" autocomplete="off">
+        </div>
+        <span class="count" id="ipCount"></span>
+      </div>
+      <div class="card tablewrap">
+        <table class="logtable">
+          <thead><tr><th>IP address</th><th>Hits</th><th>First seen</th><th>Last seen</th><th>Top actions</th><th>User agent</th></tr></thead>
+          <tbody id="ipBody"></tbody>
+        </table>
       </div>
     </div>
 

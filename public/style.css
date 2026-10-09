@@ -536,6 +536,13 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .msg .msg-text { word-break: break-word; }
 .msg.mine .msg-del { left: -7px; right: auto; }
 .admin-msg .who { color: #c4b5fd; }
+
+/* AI bot messages */
+.bot-msg .who { color: #8fd3ff; }
+.bot-msg .bubble {
+  background: linear-gradient(135deg, rgba(110, 168, 254, .16), rgba(124, 108, 255, .12));
+  border-color: rgba(110, 168, 254, .4);
+}
 .sys { text-align: center; color: var(--text-3); font-size: .75rem; padding: 2px 0; }
 .sys span { background: var(--surface-2); padding: 3px 12px; border-radius: 99px; border: 1px solid var(--border); }
 .typing-ind { font-size: .76rem; color: var(--text-3); min-height: 18px; padding: 0 6px; font-style: italic; }

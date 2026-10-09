@@ -9,6 +9,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const backup = require('./github-backup');
 const mega = require('./mega-backup');
+const aiBot = require('./ai-bot');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
@@ -231,10 +232,30 @@ app.use('/static', express.static(path.join(__dirname, 'public'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'),
 }));
 
-// visit logging for everything
+// visit logging: ONE entry per visitor session (30-min window), not per request.
+// cookie'd browsers are tracked by `send_vid`; cookie-less clients (bots/monitors/APIs) by IP+UA.
+const VISIT_WINDOW = 30 * 60 * 1000;
+const visitSessions = new Map();
 app.use((req, res, next) => {
-  if (!req.path.startsWith('/socket.io') && !req.path.startsWith('/static')) {
-    log('visit', `${req.method} ${req.path}`, req);
+  const skip = req.path.startsWith('/socket.io') || req.path.startsWith('/static') || req.path.startsWith('/api/health');
+  if (!skip) {
+    const now = Date.now();
+    const hasVid = req.cookies && req.cookies.send_vid;
+    const ipUa = (req.ip || 'x') + '|' + String(req.headers['user-agent'] || '').slice(0, 60);
+    const key = hasVid || ipUa;
+    const last = visitSessions.get(key) || 0;
+    if (now - last >= VISIT_WINDOW) {
+      visitSessions.set(key, now);
+      if (visitSessions.size > 5000) visitSessions.delete(visitSessions.keys().next().value);
+      log('visit', `${req.method} ${req.path} · session start`, req);
+    }
+    if (!hasVid) {
+      // hand out a visitor cookie + seed its window so the follow-up
+      // cookie'd request doesn't count as a second session
+      const newVid = 'v' + newId();
+      try { res.append('Set-Cookie', `send_vid=${newVid}; Max-Age=31536000; Path=/; SameSite=Lax`); } catch {}
+      visitSessions.set(newVid, now);
+    }
   }
   next();
 });
@@ -428,13 +449,23 @@ app.post('/api/admin/password', requireAdmin, (req, res) => {
 
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
   let totalMessages = 0, lastActivity = 0;
-  for (const list of Object.values(chats)) {
+  let aiReplies = 0, aiMode0 = 0, aiMode1 = 0, aiLast = 0, aiRooms = 0, aiMentions = 0;
+  for (const [rname, list] of Object.entries(chats)) {
     totalMessages += list.length;
     if (list.length) { const ts = list[list.length - 1].ts; if (ts > lastActivity) lastActivity = ts; }
+    if (rname.startsWith('ai-')) aiRooms++;
+    for (const m of list) {
+      if (m.bot) {
+        aiReplies++;
+        if (m.mode === 1) aiMode1++; else aiMode0++;
+        if (m.ts > aiLast) aiLast = m.ts;
+      } else if (/@ai/i.test(String(m.text || ''))) aiMentions++;
+    }
   }
   const onlineNow = Object.values(presence).reduce((n, m) => n + m.size, 0);
   const uniqueVisitors = new Set();
   for (const list of Object.values(chatVisitors)) for (const v of list) uniqueVisitors.add(v.uid || v.name);
+  const uniqueIps = new Set(logs.map(l => l.ip).filter(Boolean));
   res.json({
     items: items.length,
     active: items.filter(i => !i.deleted).length,
@@ -446,9 +477,26 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
     chatMessages: totalMessages,
     onlineNow,
     chatVisitors: uniqueVisitors.size,
+    uniqueIps: uniqueIps.size,
+    aiReplies, aiMode0, aiMode1, aiRooms, aiMentions, aiLast,
     lastActivity,
     lastVisit: logs.length ? logs[0].ts : 0,
   });
+});
+
+/* every IP that ever hit the site (aggregated from logs) */
+app.get('/api/admin/ips', requireAdmin, (req, res) => {
+  const map = new Map();
+  for (const l of logs) {
+    if (!l.ip) continue;
+    const e = map.get(l.ip) || { ip: l.ip, hits: 0, first: l.ts, last: 0, ua: '', actions: {} };
+    e.hits++;
+    if (l.ts < e.first) e.first = l.ts;
+    if (l.ts >= e.last) { e.last = l.ts; e.ua = l.ua || e.ua; }
+    e.actions[l.action] = (e.actions[l.action] || 0) + 1;
+    map.set(l.ip, e);
+  }
+  res.json([...map.values()].sort((a, b) => b.last - a.last));
 });
 
 /* cloud backup status for the admin dashboard */
@@ -544,17 +592,25 @@ app.get('/api/chat/stats', (req, res) => {
       visitors: (chatVisitors[name] || []).length,
       lastMsgTs: list.length ? list[list.length - 1].ts : 0,
       isPublic: name === 'public',
+      isAi: name.startsWith('ai-'),
     };
   });
   const onlineNow = Object.values(presence).reduce((n, m) => n + m.size, 0);
   const unique = new Set();
   for (const list of Object.values(chatVisitors)) for (const v of list) unique.add(v.uid || v.name);
+  let aiReplies = 0, aiMode1 = 0;
+  for (const list of Object.values(chats)) for (const m of list) {
+    if (m.bot) { aiReplies++; if (m.mode === 1) aiMode1++; }
+  }
   res.json({
     rooms,
     onlineNow,
     totalMessages: rooms.reduce((s, r) => s + r.messages, 0),
     publicMessages: (chats['public'] || []).length,
     uniqueVisitors: unique.size,
+    aiReplies,
+    aiMode1,
+    aiRooms: rooms.filter(r => r.isAi).length,
   });
 });
 
@@ -644,6 +700,32 @@ function recordVisit(room, name, uid, isAdmin, ip) {
 }
 function requirePrivateAdminPw(pw) { return String(pw || '') === PRIVATE_ADMIN_PASSWORD && !!PRIVATE_ADMIN_PASSWORD; }
 
+/* ------------------------------- AI chat bot -------------------------------
+   Present in every room. Replies when mentioned (@ai / @ai0 funny, @ai1 mysterious).
+   Rooms named `ai-<uid>` are 1-on-1 chats where it replies to every message. */
+const aiLastMode = new Map();
+function maybeAiReply(room, userName, uid, text, reqLike) {
+  const isAiRoom = room && room.startsWith('ai-');
+  const m = /@ai(0|1)?/i.exec(String(text || ''));
+  let mode = m ? (m[1] === '1' ? 1 : 0) : null;
+  if (!isAiRoom && mode === null) return; // no mention outside AI rooms
+  if (mode === null) mode = aiLastMode.get(uid) ?? 0; // in AI rooms: remember last mode
+  aiLastMode.set(uid, mode);
+  const prompt = String(text || '').replace(/@ai(0|1)?/gi, '').trim();
+
+  setTimeout(() => {
+    try {
+      const msg = {
+        ts: Date.now(), name: 'AI', text: aiBot.reply(mode, prompt, userName),
+        id: newId(), uid: 'bot', bot: true, mode,
+      };
+      saveChat(room, msg);
+      io.to(room).emit('msg', msg);
+      log('ai_msg', `room=${room} mode=${mode}`, reqLike);
+    } catch (e) { console.error('[ai] reply failed', e.message); }
+  }, 700 + Math.floor(Math.random() * 900));
+}
+
 io.on('connection', (socket) => {
   let room = null, name = 'anonymous', isPrivateAdmin = false;
 
@@ -687,7 +769,9 @@ io.on('connection', (socket) => {
     if (isPrivateAdmin) msg.admin = true;
     saveChat(room, msg);
     io.to(room).emit('msg', msg);
-    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}`, { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+    const reqLike = { headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } };
+    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}`, reqLike);
+    maybeAiReply(room, name, socket.data.uid, t, reqLike);
   });
 
   /* delete a single message: own messages always; any message if private admin */

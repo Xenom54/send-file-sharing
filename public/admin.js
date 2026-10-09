@@ -44,7 +44,7 @@ async function enterDash() {
 
 /* ------------------------------- OVERVIEW -------------------------------- */
 async function loadOverview() {
-  loadStats(); loadCloud(); loadChatBox();
+  loadStats(); loadCloud(); loadChatBox(); loadAiBox(); loadTopIps();
 }
 $('#btnCloudRefresh').addEventListener('click', loadCloud);
 
@@ -53,15 +53,71 @@ async function loadStats() {
     const s = await (await fetch('/api/admin/stats')).json();
     const cards = [
       ['Active items', s.active, '📦'], ['Recycle bin', s.deleted, '🗑️'],
-      ['Visits logged', s.visits, '👁️'], ['Uploads', s.uploads, '⬆️'],
-      ['Chat rooms', s.rooms, '💬'], ['Online now', s.onlineNow, '🟢'],
-      ['Chat messages', s.chatMessages, '✉️'], ['Chat visitors', s.chatVisitors, '👥'],
+      ['Visits (sessions)', s.visits, '👁️'], ['Uploads', s.uploads, '⬆️'],
+      ['Unique IPs', s.uniqueIps, '🌐'], ['Chat rooms', s.rooms, '💬'],
+      ['Online now', s.onlineNow, '🟢'], ['Chat messages', s.chatMessages, '✉️'],
+      ['Chat visitors', s.chatVisitors, '👥'], ['AI replies', s.aiReplies, '🤖'],
       ['Storage used', fmtSize(s.storageBytes), '💾'], ['Last activity', ago(s.lastActivity), '🕒'],
     ];
     $('#stats').innerHTML = cards.map(([k, v, ic]) =>
       `<div class="card stat hoverable"><span class="ic">${ic}</span><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join('');
   } catch { /* ignore */ }
 }
+
+/* ------------------------- AI pane + top visitors pane -------------------- */
+async function loadAiBox() {
+  try {
+    const s = await (await fetch('/api/admin/stats')).json();
+    const aiRows = [
+      ['😏 Funny replies', s.aiMode0],
+      ['🌑 Mysterious replies', s.aiMode1],
+      ['🤖 Total replies', s.aiReplies],
+      ['💬 Mentions of the bot', s.aiMentions],
+      ['🛋️ 1-on-1 AI chats', s.aiRooms],
+      ['🕒 Last AI activity', ago(s.aiLast)],
+    ];
+    $('#aiBox').innerHTML = aiRows.map(([k, v]) =>
+      `<div class="pane-row"><div class="pr-title">${k}</div><div class="pr-val">${esc(v)}</div></div>`).join('');
+  } catch { /* ignore */ }
+}
+
+let ipList = [];
+async function loadTopIps() {
+  try {
+    ipList = await (await fetch('/api/admin/ips')).json();
+    const top = ipList.slice().sort((a, b) => b.hits - a.hits).slice(0, 6);
+    $('#topIpsBox').innerHTML = top.length ? top.map(e =>
+      `<div class="pane-row"><div><div class="pr-title mono">${esc(e.ip)}</div><div class="small muted">${esc(ago(e.last))} · ${esc(String(e.ua || '').slice(0, 34))}</div></div><div class="pr-val">${e.hits}</div></div>`
+    ).join('') : '<div class="pane-row muted">No visitors recorded yet.</div>';
+  } catch { /* ignore */ }
+}
+
+async function loadIps() {
+  try {
+    ipList = await (await fetch('/api/admin/ips')).json();
+    renderIps();
+  } catch { toast('⚠ Failed to load IPs', 'err'); }
+}
+
+let ipQuery = '';
+function renderIps() {
+  let list = ipList;
+  if (ipQuery) list = list.filter(e => String(e.ip).toLowerCase().includes(ipQuery));
+  $('#ipCount').textContent = `${list.length}${list.length !== ipList.length ? ' of ' + ipList.length : ''} IPs`;
+  $('#ipBody').innerHTML = list.length ? list.map(e => {
+    const acts = Object.entries(e.actions || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([a, n]) => `<span class="act ${esc(a)}">${esc(a.replace(/_/g, ' '))} ×${n}</span>`).join(' ');
+    return `<tr>
+      <td class="ip mono">${esc(e.ip)}</td>
+      <td>${e.hits}</td>
+      <td class="nowrap">${esc(fmtTime(e.first))}</td>
+      <td class="nowrap">${esc(ago(e.last))}</td>
+      <td>${acts}</td>
+      <td class="ua" title="${esc(e.ua)}">${esc(String(e.ua || '').slice(0, 44))}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6" class="muted" style="text-align:center;padding:34px">No IPs recorded yet.</td></tr>`;
+}
+$('#ipSearch').addEventListener('input', () => { ipQuery = $('#ipSearch').value.trim().toLowerCase(); renderIps(); });
 
 async function loadCloud() {
   const box = $('#cloudBox');
@@ -127,7 +183,7 @@ const LOG_CATEGORIES = {
   visits: ['visit'],
   uploads: ['upload', 'chat_image'],
   downloads: ['download'],
-  chat: ['chat_join', 'chat_admin_join', 'chat_msg', 'chat_msg_del', 'chat_create', 'chat_delete', 'backup_restore'],
+  chat: ['chat_join', 'chat_admin_join', 'chat_msg', 'chat_msg_del', 'chat_create', 'chat_delete', 'ai_msg', 'backup_restore'],
   admin: ['admin_login', 'privateadmin_login', 'privateadmin_pw_change'],
   deletions: ['delete', 'purge', 'clear_logs'],
 };
@@ -263,14 +319,17 @@ $('#btnChangePrivateAdminPw').addEventListener('click', async () => {
 });
 
 /* --------------------------------- TABS ---------------------------------- */
-$$('#adminTabs .tab').forEach(t => t.addEventListener('click', () => {
-  $$('#adminTabs .tab').forEach(x => x.classList.toggle('active', x === t));
-  $$('.apane').forEach(p => p.classList.toggle('hidden', p.id !== 'apane-' + t.dataset.atab));
-  if (t.dataset.atab === 'overview') loadOverview();
-  if (t.dataset.atab === 'logs') loadLogs();
-  if (t.dataset.atab === 'items') loadAll();
-  if (t.dataset.atab === 'trash') loadTrash();
-}));
+function switchTab(atab) {
+  $$('#adminTabs .tab').forEach(x => x.classList.toggle('active', x.dataset.atab === atab));
+  $$('.apane').forEach(p => p.classList.toggle('hidden', p.id !== 'apane-' + atab));
+  if (atab === 'overview') loadOverview();
+  if (atab === 'logs') loadLogs();
+  if (atab === 'visitors') loadIps();
+  if (atab === 'items') loadAll();
+  if (atab === 'trash') loadTrash();
+}
+$$('#adminTabs .tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.atab)));
+$$('[data-atab-go]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); switchTab(a.dataset.atabGo); }));
 
 /* --------------------------------- BOOT ---------------------------------- */
 (async () => {
