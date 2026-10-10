@@ -23,12 +23,45 @@ const store = {
 };
 const userName = () => Profile.get() || 'guest';
 
-const socket = io({ autoConnect: false, transports: ['websocket', 'polling'] });
+const socket = io({
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 800,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+});
 let currentRoom = null;
 let iAmAdmin = false, iAmOwner = false;
 let typingTimeout = null, lastTyping = 0;
 let replyTarget = null; // { id, name, text }
 let lastMsgs = [];
+let pendingSilentHistory = false; // set while a silent (reconnect) rejoin is in flight
+
+/* ---------------- drafts: typed text survives reconnects AND page reloads -------------- */
+function saveDraft() {
+  try {
+    if (currentRoom) {
+      const v = $('#msgInput').value;
+      const k = 'send_draft_' + currentRoom;
+      if (v.trim()) localStorage.setItem(k, v); else localStorage.removeItem(k);
+    }
+  } catch {}
+}
+function restoreDraft(code) {
+  try {
+    $('#msgInput').value = localStorage.getItem('send_draft_' + code) || '';
+  } catch { $('#msgInput').value = ''; }
+}
+(function () {
+  let t = null;
+  document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'msgInput') {
+      clearTimeout(t);
+      t = setTimeout(saveDraft, 400);
+    }
+  });
+})();
 
 /* ------------------------------ unread dots ------------------------------- */
 function markUnread(room) {
@@ -161,6 +194,8 @@ function startChat(code) {
 }
 
 function joinRoom(code, opts = {}) {
+  const silent = !!opts.silent; // silent = reconnect: keep everything the user is doing
+  pendingSilentHistory = silent;
   const name = userName();
   currentRoom = code;
   const isKali = code.startsWith('ai-');
@@ -169,14 +204,14 @@ function joinRoom(code, opts = {}) {
   $('#roomIcon').textContent = isKali ? '✨' : (code === 'public' ? '🌍' : '💬');
   if (!iAmAdmin) $('#adminBadge').classList.add('hidden');
   $('#btnDeleteRoom').style.display = 'none';
-  if (!opts.silent) {
+  if (!silent) {
     $('#messages').innerHTML = '';
-    $('#msgInput').value = '';
+    restoreDraft(code); // load any saved draft for this room
     $('#typingInd').textContent = '';
+    cancelReply();
   }
   $('#msgInput').placeholder = isKali ? 'Talk to Kali… (or summon it anywhere with @kali)' : 'Type a message… (@kali to summon Kali)';
   $('#membersPanel').classList.toggle('hidden', !iAmAdmin);
-  cancelReply();
   const pw = sessionStorage.getItem('send_privateadmin_pw') || '';
   socket.emit('join', { room: code, name, uid: store.uid, pw }, (ack) => {
     addRoom(code);
@@ -255,6 +290,7 @@ function send() {
   if (replyTarget) payload.replyTo = replyTarget.id;
   socket.emit('msg', payload);
   $('#msgInput').value = '';
+  saveDraft(); // sent → clear the saved draft too
   cancelReply();
   socket.emit('typing', false);
 }
@@ -487,12 +523,21 @@ $('#btnNewRoom').addEventListener('click', async () => {
 
 /* ------------------------------- socket events ------------------------------ */
 /* auto-rejoin: if the connection drops and comes back (server restart, network
-   blip), silently rejoin the current room so the user never gets "kicked out" */
+   blip, proxy kill), silently rejoin WITHOUT touching the input or messages.
+   The user must never notice a thing — this is the "never kicked out" fix. */
 socket.on('connect', () => {
-  if (currentRoom) joinRoom(currentRoom, { silent: false });
+  if (currentRoom) joinRoom(currentRoom, { silent: true });
 });
 socket.on('history', list => {
-  lastMsgs = list || [];
+  list = list || [];
+  const wasSilent = pendingSilentHistory;
+  pendingSilentHistory = false;
+  // silent rejoin with NO new messages → do absolutely nothing (zero visual change)
+  const unchanged = wasSilent &&
+    lastMsgs.length === list.length &&
+    (list.length === 0 || (list[0].id === lastMsgs[0]?.id && list[list.length - 1].id === lastMsgs[lastMsgs.length - 1]?.id));
+  if (unchanged) return;
+  lastMsgs = list;
   $('#messages').innerHTML = '';
   lastMsgs.forEach(m => appendMsg(m, m.uid === store.uid));
   $('#messages').scrollTop = $('#messages').scrollHeight;

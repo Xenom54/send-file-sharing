@@ -784,7 +784,9 @@ const server = http.createServer(app);
 server.requestTimeout = 0;
 server.headersTimeout = 0;
 server.keepAliveTimeout = 0;
-const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024, pingTimeout: 30000, pingInterval: 10000 });
+/* tolerant heartbeat: Render's free tier briefly freezes/throttles the CPU —
+   with a 60s pong window a 30-40s freeze no longer drops everyone's socket */
+const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024, pingInterval: 25000, pingTimeout: 60000 });
 
 function roomName(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40); }
 
@@ -1084,7 +1086,13 @@ io.on('connection', (socket) => {
   });
 });
 
-/* ------------------------------ chat connection ------------------------------ */
+/* ------------------------------ chat connection ------------------------------
+   Reconnect-proofing: when a user's connection blips (proxy kill, CPU freeze,
+   network switch), they reconnect within seconds. To make that INVISIBLE:
+   - "left" broadcasts are delayed 20s and cancelled if they come back
+   - a rejoin within the window broadcasts NO "joined" message either        */
+const pendingLeave = new Map(); // `uid|room` → { timer, room, name }
+
 io.on('connection', (socket) => {
   let room = null, name = 'anonymous', isPrivateAdmin = false;
   const reqLike = () => ({ headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
@@ -1106,6 +1114,14 @@ io.on('connection', (socket) => {
     socket.join(room);
     socket.data.room = room; socket.data.name = name; socket.data.uid = uid; socket.data.admin = isPrivateAdmin;
 
+    // quick reconnect? cancel the pending "left" broadcast and stay quiet
+    const leaveKey = uid + '|' + room;
+    const wasQuickReconnect = pendingLeave.has(leaveKey);
+    if (wasQuickReconnect) {
+      clearTimeout(pendingLeave.get(leaveKey).timer);
+      pendingLeave.delete(leaveKey);
+    }
+
     // presence + visitor history
     if (!presence[room]) presence[room] = new Map();
     presence[room].set(socket.id, { name, uid, admin: isPrivateAdmin, since: Date.now() });
@@ -1117,8 +1133,8 @@ io.on('connection', (socket) => {
     socket.emit('role', { admin: isPrivateAdmin, owner: !!roomOwners[room] });
     // private admins enter privately everywhere except the public chat
     const stealth = isPrivateAdmin && room !== 'public';
-    if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
-    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}`, reqLike());
+    if (!stealth && !wasQuickReconnect) io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
+    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}${wasQuickReconnect ? ' (reconnect)' : ''}`, reqLike());
     if (ack) ack({ ok: true, admin: isPrivateAdmin });
     } catch (e) { console.error('[io join]', e.message); }
   });
@@ -1187,11 +1203,20 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     try {
     if (room) {
-      if (presence[room]) presence[room].delete(socket.id);
-      emitPresenceToAdmins(room);
-      // stealth: private admins leave silently too (except in the public chat)
+      // clear any stuck typing indicator for this user
+      socket.to(room).emit('typing', { name, typing: false });
       const stealth = isPrivateAdmin && room !== 'public';
-      if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
+      const key = (socket.data.uid || socket.id) + '|' + room;
+      // cancel a stale timer for the same key (double disconnect safety)
+      const prev = pendingLeave.get(key);
+      if (prev) clearTimeout(prev.timer);
+      const t = setTimeout(() => {
+        pendingLeave.delete(key);
+        if (presence[room]) presence[room].delete(socket.id);
+        emitPresenceToAdmins(room);
+        if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
+      }, 20000);
+      pendingLeave.set(key, { timer: t, room });
     }
     } catch (e) { console.error('[io disconnect]', e.message); }
   });

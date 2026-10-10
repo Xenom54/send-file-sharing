@@ -9,10 +9,14 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   const files = collect(ROOT);
   console.log('uploading', files.length, 'files');
   const tree = [];
-  for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); console.log('  done', f.path); }
+  for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: 'v10: LIVE STREAMING (WebRTC screen share), streamadmin secret watch, admin folder controls, item rename, folder items hidden from main page', tree: treeRes.sha, parents: [head.object.sha] }) });
+  const MSG = 'CRITICAL FIX: periodic disconnects (~5min) no longer kick users or lose typed text. '
+    + 'Silent rejoin on reconnect (input/messages/reply never touched), smart history sync (unchanged rooms skip re-render), '
+    + 'per-room draft autosave in localStorage (survives F5), tolerant heartbeat (25s/60s survives Render CPU freezes), '
+    + 'quiet reconnect (no leave/join spam, 20s grace window), stuck typing indicators cleared.';
+  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);
   process.exit(0);
