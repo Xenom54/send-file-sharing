@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07080f">
+  <title>Send — Stream Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+  <link rel="stylesheet" href="/static/style.css?v=10">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="brand" href="/"><span class="logo">📡</span><span class="name">Send</span></a>
+      <div class="nav-links">
+        <a href="/">Site</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- login -->
+  <div class="card admin-login" id="loginCard">
+    <div class="lock-ic">📡</div>
+    <h2>Stream admin</h2>
+    <div class="sub">Secretly watch any live stream and stop streams. The host never knows.</div>
+    <div class="field">
+      <label class="fl">Password</label>
+      <input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn primary" id="btnLogin" style="width:100%">Log in →</button>
+  </div>
+
+  <!-- dashboard -->
+  <div class="wrap hidden" id="dash">
+    <div class="hero">
+      <div style="flex:1">
+        <h1>Stream admin</h1>
+        <p>All live streams. Watch secretly, or stop any stream.</p>
+      </div>
+      <button class="btn small" id="btnRefresh">↻ Refresh</button>
+      <button class="btn small ghost" id="btnLogout">Log out</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+    <div class="grid" id="streamsGrid"></div>
+  </div>
+
+  <!-- secret watch view -->
+  <div class="wrap hidden" id="watchView">
+    <div class="items-toolbar">
+      <button class="btn small" id="btnBack">← Back</button>
+      <h2 style="font-size:1.3rem;margin:0" id="watchTitle">stream</h2>
+      <span class="pill ok">● SECRET WATCH</span>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn small danger" id="btnForceStop">⏹ Stop this stream</button>
+    </div>
+    <div class="card" style="padding:14px">
+      <video id="adminVideo" autoplay playsinline style="width:100%;border-radius:12px;background:#000"></video>
+    </div>
+  </div>
+
+  <footer class="footer" style="margin-top:40px">
+    <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div>
+  </footer>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/static/streamadmin.js?v=10"></script>
+</body>
+</html>

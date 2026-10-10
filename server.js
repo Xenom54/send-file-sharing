@@ -20,6 +20,7 @@ const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : pat
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 const ADMIN_PASSWORD_DEFAULT = 'admin123';
 const PRIVATE_ADMIN_PASSWORD_DEFAULT = 'admin123';
+const STREAM_ADMIN_PASSWORD_DEFAULT = 'admin123';
 const MAX_FILE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB
 
 [DATA_DIR, UPLOAD_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
@@ -69,6 +70,17 @@ function setPrivateAdminPassword(pw) {
   writeJSON(paths.privateadmin, { password: pw });
   backupPush('data', 'privateadmin.json');
   megaPush('data', 'privateadmin.json');
+}
+
+/* stream-admin password (secret stream watcher) */
+let STREAM_ADMIN_PASSWORD = process.env.STREAM_ADMIN_PASSWORD
+  || (readJSON(path.join(DATA_DIR, 'streamadmin.json'), null) || {}).password
+  || STREAM_ADMIN_PASSWORD_DEFAULT;
+function setStreamAdminPassword(pw) {
+  STREAM_ADMIN_PASSWORD = pw;
+  writeJSON(path.join(DATA_DIR, 'streamadmin.json'), { password: pw });
+  backupPush('data', 'streamadmin.json');
+  megaPush('data', 'streamadmin.json');
 }
 
 function saveItems() { writeJSON(paths.items, items); backupPush('data', 'items.json'); megaPush('data', 'items.json'); }
@@ -273,14 +285,30 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 app.get('/private', (req, res) => res.sendFile(path.join(__dirname, 'public', 'private.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 app.get('/privateadmin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privateadmin.html')));
+app.get('/stream', (req, res) => res.sendFile(path.join(__dirname, 'public', 'stream.html')));
+app.get('/streamadmin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'streamadmin.html')));
+
+/* stream-admin password check */
+app.post('/api/streamadmin/login', (req, res) => {
+  const pw = String(req.body?.pw || '');
+  if (pw !== STREAM_ADMIN_PASSWORD) { log('streamadmin_login', 'failed', req); return res.status(401).json({ error: 'wrong password' }); }
+  log('streamadmin_login', 'success', req);
+  res.json({ ok: true });
+});
+app.get('/api/streamadmin/streams', (req, res) => {
+  if (String(req.query.pw || '') !== STREAM_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
+  res.json(Object.entries(liveStreams).map(([code, s]) => ({
+    code, host: s.hostName, viewers: s.viewers.size, startedAt: s.startedAt, hasPw: !!s.pw,
+  })));
+});
 
 // health check (for uptime monitors / deployment platforms)
 app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), items: items.length }));
 
 /* --------------------------------- api ------------------------------------ */
-// ---- items
+// ---- items (main page: only items that live OUTSIDE folders)
 app.get('/api/items', (req, res) => {
-  const list = items.filter(i => !i.deleted).sort((a, b) => b.createdAt - a.createdAt).map(publicItem);
+  const list = items.filter(i => !i.deleted && !i.folder).sort((a, b) => b.createdAt - a.createdAt).map(publicItem);
   res.json(list);
 });
 
@@ -632,6 +660,44 @@ app.put('/api/items/:id/folder', async (req, res) => {
   res.json(publicItem(it));
 });
 
+/* rename any item (admin) */
+app.put('/api/items/:id/rename', requireAdmin, (req, res) => {
+  const it = items.find(i => i.id === req.params.id);
+  if (!it) return res.status(404).json({ error: 'not found' });
+  const title = String(req.body?.title || '').slice(0, 200);
+  if (!title.trim()) return res.status(400).json({ error: 'empty title' });
+  it.title = title;
+  it.edited = true;
+  saveItems();
+  log('item_rename', `→ ${title}`, req);
+  res.json(publicItem(it));
+});
+
+/* ADMIN folder controls: delete / rename / change settings on ANY folder */
+app.put('/api/folders/:name/admin', requireAdmin, (req, res) => {
+  const name = folderName(req.params.name);
+  const f = folders[name];
+  if (!f) return res.status(404).json({ error: 'no such folder' });
+  if (typeof req.body?.newName === 'string') {
+    const nn = folderName(req.body.newName);
+    if (!nn || nn !== name) {
+      if (folders[nn]) return res.status(409).json({ error: 'name taken' });
+      folders[nn] = { ...f, name: nn };
+      delete folders[name];
+      for (const it of items) if (it.folder === name) it.folder = nn;
+    }
+  }
+  const cur = folders[folderName(req.body?.newName) || name] || f;
+  if (['all', 'admin'].includes(req.body?.visibility)) cur.visibility = req.body.visibility;
+  if (['anyone', 'owner'].includes(req.body?.edit)) cur.edit = req.body.edit;
+  if (typeof req.body?.pw === 'string') {
+    cur.pw = req.body.pw ? crypto.createHash('sha256').update(req.body.pw).digest('hex') : null;
+  }
+  saveFolders(); saveItems();
+  log('folder_admin', `name=${cur.name}`, req);
+  res.json({ ok: true, name: cur.name, visibility: cur.visibility, edit: cur.edit, hasPw: !!cur.pw });
+});
+
 /* cloud backup status for the admin dashboard */
 app.get('/api/admin/cloud', requireAdmin, async (req, res) => {
   const out = { mega: { configured: mega.configured() }, github: backup.info() };
@@ -884,6 +950,141 @@ function maybeKaliReply(room, userName, text, reqLike) {
   }, 400 + Math.floor(Math.random() * 500));
 }
 
+/* ============================ STREAMS (WebRTC) ============================
+   Host shares screen; viewers watch. Optional per-stream password.
+   stream-admin can watch ANY stream secretly and force-stop any stream.     */
+const liveStreams = {}; // code → { hostId, hostName, pw(hash|null), viewers: Map<sid,{name}>, startedAt }
+
+const streamCode = v => String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
+const hashPw = pw => pw ? crypto.createHash('sha256').update(pw).digest('hex') : null;
+
+function streamListPublic() {
+  return Object.entries(liveStreams).map(([code, s]) => ({
+    code, host: s.hostName, viewers: s.viewers.size, hasPw: !!s.pw, startedAt: s.startedAt,
+  }));
+}
+function endStream(c, reason) {
+  const s = liveStreams[c];
+  if (!s) return;
+  delete liveStreams[c];
+  io.to('stream:' + c).emit('stream_ended', { code: c, reason });
+  io.socketsLeave('stream:' + c);
+  io.emit('stream_update', { streams: streamListPublic() });
+  log('stream_end', `code=${c} (${reason})`);
+}
+
+io.on('connection', (socket) => {
+  let streamRole = null; // 'host' | 'viewer' | 'admin' in the current stream
+  let streamJoined = null;
+  const reqLikeS = () => ({ headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
+
+  socket.on('stream_list', (ack) => {
+    if (typeof ack === 'function') ack({ streams: streamListPublic() });
+  });
+
+  socket.on('stream_start', (data, ack) => {
+    try {
+      const c = streamCode(data?.code);
+      if (!c) return ack && ack({ error: 'invalid code' });
+      if (liveStreams[c]) return ack && ack({ error: 'code already live' });
+      liveStreams[c] = {
+        code: c, hostId: socket.id, hostName: String(data?.name || 'anonymous').slice(0, 30),
+        pw: data?.pw ? hashPw(String(data.pw)) : null, viewers: new Map(), startedAt: Date.now(),
+      };
+      streamRole = 'host';
+      streamJoined = c;
+      socket.data.streamCode = c;
+      io.emit('stream_update', { streams: streamListPublic() });
+      log('stream_start', `code=${c} host=${data?.name}${data?.pw ? ' +pw' : ''}`, reqLikeS());
+      if (ack) ack({ ok: true, code: c });
+    } catch (e) { console.error('[stream start]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  socket.on('stream_join', (data, ack) => {
+    try {
+      const c = streamCode(data?.code);
+      const s = liveStreams[c];
+      if (!s) return ack && ack({ error: 'no such stream' });
+      if (s.pw && hashPw(String(data?.pw || '')) !== s.pw) {
+        log('stream_join', `code=${c} FAILED pw`, reqLikeS());
+        return ack && ack({ error: 'wrong stream password' });
+      }
+      socket.join('stream:' + c);
+      s.viewers.set(socket.id, { name: String(data?.name || 'anonymous').slice(0, 30) });
+      streamRole = 'viewer';
+      streamJoined = c;
+      socket.data.streamCode = c;
+      io.to(s.hostId).emit('stream_viewer', { id: socket.id, name: s.viewers.get(socket.id).name, count: s.viewers.size });
+      io.emit('stream_update', { streams: streamListPublic() });
+      log('stream_join', `code=${c} name=${data?.name}`, reqLikeS());
+      if (ack) ack({ ok: true, code: c, host: s.hostName, hostId: s.hostId });
+    } catch (e) { console.error('[stream join]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  /* SECRET admin watch: the host sees only "(hidden)" — no name, no real count bump */
+  socket.on('stream_join_admin', (data, ack) => {
+    try {
+      if (String(data?.pw || '') !== STREAM_ADMIN_PASSWORD) return ack && ack({ error: 'wrong admin password' });
+      const c = streamCode(data?.code);
+      const s = liveStreams[c];
+      if (!s) return ack && ack({ error: 'no such stream' });
+      socket.join('stream:' + c);
+      streamRole = 'admin';
+      streamJoined = c;
+      socket.data.streamCode = c;
+      io.to(s.hostId).emit('stream_viewer', { id: socket.id, name: '(hidden)', secret: true, count: s.viewers.size });
+      log('stream_admin_watch', `code=${c} (secret)`, reqLikeS());
+      if (ack) ack({ ok: true, code: c, host: s.hostName, hostId: s.hostId });
+    } catch (e) { console.error('[stream admin join]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  /* WebRTC signaling relay — both directions */
+  socket.on('stream_signal', (data) => {
+    try {
+      if (!streamJoined || !data?.to) return;
+      const target = io.sockets.sockets.get(String(data.to));
+      if (!target || target.data?.streamCode !== streamJoined) return;
+      target.emit('stream_signal', { from: socket.id, data: data.data });
+    } catch (e) { console.error('[stream signal]', e.message); }
+  });
+
+  socket.on('stream_stop', (_d, ack) => {
+    try {
+      if (streamRole !== 'host' || !streamJoined) return ack && ack({ error: 'not hosting' });
+      endStream(streamJoined, 'host ended');
+      if (ack) ack({ ok: true });
+    } catch (e) { console.error('[stream stop]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  /* ADMIN force-stop any stream */
+  socket.on('stream_stop_admin', (data, ack) => {
+    try {
+      if (String(data?.pw || '') !== STREAM_ADMIN_PASSWORD) return ack && ack({ error: 'wrong admin password' });
+      const c = streamCode(data?.code);
+      if (!liveStreams[c]) return ack && ack({ error: 'no such stream' });
+      endStream(c, 'stopped by stream admin');
+      log('stream_admin_stop', `code=${c}`, reqLikeS());
+      if (ack) ack({ ok: true });
+    } catch (e) { console.error('[stream admin stop]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  socket.on('disconnect', () => {
+    try {
+      if (streamRole === 'host' && streamJoined && liveStreams[streamJoined]?.hostId === socket.id) {
+        endStream(streamJoined, 'host left');
+      } else if (streamRole === 'viewer' && streamJoined) {
+        const s = liveStreams[streamJoined];
+        if (s) {
+          s.viewers.delete(socket.id);
+          io.to(s.hostId).emit('stream_viewer_left', { id: socket.id, count: s.viewers.size });
+          io.emit('stream_update', { streams: streamListPublic() });
+        }
+      }
+    } catch (e) { console.error('[stream disconnect]', e.message); }
+  });
+});
+
+/* ------------------------------ chat connection ------------------------------ */
 io.on('connection', (socket) => {
   let room = null, name = 'anonymous', isPrivateAdmin = false;
   const reqLike = () => ({ headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });

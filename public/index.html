@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📨</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=9">
+  <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
   <nav class="navbar">
@@ -17,6 +17,7 @@
         <span class="nav-bell" id="btnBell">🔔<span class="bell-label"></span></span>
         <a href="/" class="active">Home</a>
         <a href="/private" id="navChat">💬 Chat</a>
+        <a href="/stream">📡 Stream</a>
       </div>
     </div>
   </nav>
@@ -186,20 +187,6 @@
         <input type="text" id="folderNameInput" placeholder="e.g. project-files" maxlength="40" dir="auto">
       </div>
       <div class="field">
-        <label class="fl">Who can see it?</label>
-        <select id="folderVisibility">
-          <option value="all">Everyone</option>
-          <option value="admin">Admins only</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="fl">Who can edit items inside?</label>
-        <select id="folderEdit">
-          <option value="owner">Only me (owner) + admins</option>
-          <option value="anyone">Anyone</option>
-        </select>
-      </div>
-      <div class="field">
         <label class="fl">Password (optional)</label>
         <input type="password" id="folderPw" placeholder="Leave empty for no password" autocomplete="new-password">
       </div>
@@ -207,6 +194,56 @@
       <div style="display:flex;gap:10px;margin-top:12px">
         <button class="btn" id="folderCancel" style="flex:1">Cancel</button>
         <button class="btn primary" id="folderCreate" style="flex:1">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- admin folder settings modal (admins only) -->
+  <div class="lightbox" id="folderAdminModal">
+    <div class="card" style="max-width:420px;width:calc(100% - 32px);padding:26px">
+      <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:14px">🛡️ Folder settings</h3>
+      <div class="field">
+        <label class="fl">Rename folder</label>
+        <input type="text" id="faNewName" maxlength="40" dir="auto">
+      </div>
+      <div class="field">
+        <label class="fl">Visibility</label>
+        <select id="faVisibility">
+          <option value="all">Everyone</option>
+          <option value="admin">Admins only</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="fl">Who can edit items inside</label>
+        <select id="faEdit">
+          <option value="owner">Owner + admins</option>
+          <option value="anyone">Anyone</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="fl">Password (empty = remove)</label>
+        <input type="password" id="faPw" placeholder="Leave empty to remove password" autocomplete="new-password">
+      </div>
+      <div class="small" id="faErr" style="color:var(--danger);min-height:16px;font-weight:600"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn" id="faCancel" style="flex:1">Cancel</button>
+        <button class="btn primary" id="faSave" style="flex:1">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- rename item modal -->
+  <div class="lightbox" id="renameModal">
+    <div class="card" style="max-width:400px;width:calc(100% - 32px);padding:26px">
+      <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:14px">✎ Rename</h3>
+      <div class="field">
+        <label class="fl">New title</label>
+        <input type="text" id="renameInput" maxlength="200" dir="auto">
+      </div>
+      <div class="small" id="renameErr" style="color:var(--danger);min-height:16px;font-weight:600"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn" id="renameCancel" style="flex:1">Cancel</button>
+        <button class="btn primary" id="renameSave" style="flex:1">Save</button>
       </div>
     </div>
   </div>
@@ -245,8 +282,8 @@
   <div class="toasts" id="toasts"></div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=9"></script>
-  <script src="/static/profile.js?v=9"></script>
-  <script src="/static/app.js?v=9"></script>
+  <script src="/static/notify.js?v=10"></script>
+  <script src="/static/profile.js?v=10"></script>
+  <script src="/static/app.js?v=10"></script>
 </body>
 </html>

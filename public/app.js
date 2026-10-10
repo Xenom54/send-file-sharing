@@ -102,6 +102,7 @@ function itemHTML(it, i) {
   if (it.type === 'image') actions += `<button class="btn small" data-copy-img="${url}">⧉ Copy image</button>`;
   actions += `<a class="btn small" href="${url}?download=1" download>⬇ Download${it.downloads ? ` · ${it.downloads}` : ''}</a>`;
   actions += `<button class="btn small" data-move-item="${it.id}" title="Move to folder">📁</button>`;
+  actions += `<button class="btn small" data-rename-item="${it.id}" title="Rename">🏷</button>`;
   actions += `<button class="btn small danger" data-del="${it.id}" title="Delete">🗑</button>`;
   if (it.type === 'text') actions += `<button class="btn small" data-edit-item="${it.id}" title="Edit">✎</button>`;
 
@@ -171,6 +172,7 @@ $('#items').addEventListener('click', e => {
   const dl = e.target.closest('[data-del]'); if (dl) return delItem(dl.dataset.del);
   const ed = e.target.closest('[data-edit-item]'); if (ed) return openEditModal(ed.dataset.editItem);
   const mv = e.target.closest('[data-move-item]'); if (mv) return openMoveModal(mv.dataset.moveItem);
+  const rn = e.target.closest('[data-rename-item]'); if (rn) return openRenameModal(rn.dataset.renameItem);
   const img = e.target.closest('.zoomable');
   if (img) { $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); }
 });
@@ -527,19 +529,24 @@ function renderFolders() {
     const mine = !!localStorage.getItem('send_foldertok_' + f.name);
     const icons = [
       f.locked && !f.unlocked ? '🔒' : '📁',
-      f.visibility === 'admin' ? '🛡️' : '',
       f.edit === 'anyone' ? '✎' : '',
       mine ? '★' : '',
     ].join('');
-    return `<button class="folder-item ${f.name === activeFolder ? 'active' : ''}" data-folder="${esc(f.name)}">
-      <span class="fi-name">${icons} ${esc(f.name)}</span>
-      <span class="fi-meta">${f.items}</span>
-    </button>`;
+    const adminBtn = isAdmin ? `<button class="folder-toggle" data-folder-admin="${esc(f.name)}" title="Admin settings" style="font-size:.72rem;margin-left:4px">🛡</button>` : '';
+    return `<div class="folder-item ${f.name === activeFolder ? 'active' : ''}" style="display:flex;align-items:center;gap:4px">
+      <button class="fi-open" data-folder="${esc(f.name)}" style="flex:1;display:flex;justify-content:space-between;align-items:center;background:none;border:none;color:inherit;font:inherit;cursor:pointer;text-align:left">
+        <span class="fi-name">${icons} ${esc(f.name)}</span>
+        <span class="fi-meta">${f.items}</span>
+      </button>
+      ${adminBtn}
+    </div>`;
   }).join('') : '<div class="small muted">No folders yet — create one! Anything you upload while a folder is open lands inside it.</div>';
   $('#folderCount').textContent = foldersList.length;
 }
 
 $('#folderList').addEventListener('click', e => {
+  const adm = e.target.closest('[data-folder-admin]');
+  if (adm) { e.stopPropagation(); openFolderAdmin(adm.dataset.folderAdmin); return; }
   const it = e.target.closest('[data-folder]');
   if (it) openFolder(it.dataset.folder);
 });
@@ -635,6 +642,7 @@ $('#folderItems').addEventListener('click', e => {
   const dl = e.target.closest('[data-del]'); if (dl) return delItem(dl.dataset.del);
   const ed = e.target.closest('[data-edit-item]'); if (ed) return openEditModal(ed.dataset.editItem);
   const mv = e.target.closest('[data-move-item]'); if (mv) return openMoveModal(mv.dataset.moveItem);
+  const rn = e.target.closest('[data-rename-item]'); if (rn) return openRenameModal(rn.dataset.renameItem);
   const img = e.target.closest('.zoomable');
   if (img) { $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); }
 });
@@ -681,7 +689,7 @@ $('#moveGo').addEventListener('click', async () => {
   btn.disabled = false;
 });
 
-/* new folder modal */
+/* new folder modal (simple: name + optional password only) */
 $('#btnNewFolder').addEventListener('click', () => {
   $('#folderNameInput').value = '';
   $('#folderPw').value = '';
@@ -695,16 +703,12 @@ $('#folderModal').addEventListener('click', e => { if (e.target.id === 'folderMo
 $('#folderCreate').addEventListener('click', async () => {
   const name = $('#folderNameInput').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
   if (!name) { $('#folderErr').textContent = 'Enter a name (letters, numbers, -)'; return; }
-  const body = {
-    visibility: $('#folderVisibility').value,
-    edit: $('#folderEdit').value,
-    pw: $('#folderPw').value || undefined,
-  };
+  const pw = $('#folderPw').value;
   const btn = $('#folderCreate');
   btn.disabled = true;
   try {
     const r = await fetch('/api/folders/' + encodeURIComponent(name), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visibility: 'all', edit: 'owner', pw: pw || undefined }),
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) {
@@ -712,31 +716,88 @@ $('#folderCreate').addEventListener('click', async () => {
       $('#folderModal').classList.remove('open');
       toast('✓ Folder created');
       loadFolders();
-    } else {
-      // admin-locked options need an admin session — ask for the password inline
-      if (r.status === 401) {
-        const pw = prompt('Admin password needed for that option:');
-        if (pw) {
-          const lr = await fetch('/api/admin/login', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }),
-          });
-          if (lr.ok) {
-            isAdmin = true;
-            const r2 = await fetch('/api/folders/' + encodeURIComponent(name), {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-            });
-            const d2 = await r2.json().catch(() => ({}));
-            if (r2.ok) {
-              localStorage.setItem('send_foldertok_' + name, d2.ownerToken);
-              $('#folderModal').classList.remove('open');
-              toast('✓ Folder created');
-              loadFolders();
-            } else $('#folderErr').textContent = d2.error || 'Failed';
-          } else $('#folderErr').textContent = 'Wrong admin password';
-        }
-      } else $('#folderErr').textContent = d.error || 'Failed to create';
-    }
+    } else $('#folderErr').textContent = d.error || 'Failed to create';
   } catch { $('#folderErr').textContent = 'Connection failed'; }
+  btn.disabled = false;
+});
+
+/* ---------------- admin folder settings + item rename ---------------- */
+let faFolder = null;
+function openFolderAdmin(name) {
+  faFolder = name;
+  const f = foldersList.find(x => x.name === name) || {};
+  $('#faNewName').value = name;
+  $('#faVisibility').value = f.visibility || 'all';
+  $('#faEdit').value = f.edit || 'owner';
+  $('#faPw').value = '';
+  $('#faErr').textContent = '';
+  $('#folderAdminModal').classList.add('open');
+}
+$('#faCancel').addEventListener('click', () => $('#folderAdminModal').classList.remove('open'));
+$('#folderAdminModal').addEventListener('click', e => { if (e.target.id === 'folderAdminModal') $('#folderAdminModal').classList.remove('open'); });
+$('#faSave').addEventListener('click', async () => {
+  if (!faFolder) return;
+  const body = {
+    newName: $('#faNewName').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || faFolder,
+    visibility: $('#faVisibility').value,
+    edit: $('#faEdit').value,
+    pw: $('#faPw').value !== '' ? $('#faPw').value : undefined,
+    removePw: $('#faPw').value === '' && !$('#faPw').placeholder.includes('current'),
+  };
+  const btn = $('#faSave');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/folders/' + encodeURIComponent(faFolder) + '/admin', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) {
+      toast('✓ Folder updated');
+      $('#folderAdminModal').classList.remove('open');
+      // if we were inside it and it was renamed, follow the rename
+      if (activeFolder === faFolder) { activeFolder = d.name; $('#folderTitle').textContent = '📁 ' + d.name; }
+      faFolder = null;
+      loadFolders();
+      if (activeFolder) loadFolderItems(activeFolder); else load();
+    } else $('#faErr').textContent = d.error || 'Failed (admin session may have expired)';
+  } catch { $('#faErr').textContent = 'Connection failed'; }
+  btn.disabled = false;
+});
+
+/* item rename (admin) */
+let renamingId = null;
+function openRenameModal(id) {
+  const it = findItemAnywhere(id);
+  if (!it) return;
+  renamingId = id;
+  $('#renameInput').value = it.title || it.originalName || '';
+  $('#renameErr').textContent = '';
+  $('#renameModal').classList.add('open');
+  setTimeout(() => $('#renameInput').select(), 60);
+}
+$('#renameCancel').addEventListener('click', () => $('#renameModal').classList.remove('open'));
+$('#renameModal').addEventListener('click', e => { if (e.target.id === 'renameModal') $('#renameModal').classList.remove('open'); });
+$('#renameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#renameSave').click(); });
+$('#renameSave').addEventListener('click', async () => {
+  if (!renamingId) return;
+  const title = $('#renameInput').value.trim();
+  if (!title) { $('#renameErr').textContent = 'Enter a title'; return; }
+  const btn = $('#renameSave');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/items/' + renamingId + '/rename', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+    });
+    if (r.ok) {
+      toast('✓ Renamed');
+      $('#renameModal').classList.remove('open');
+      renamingId = null;
+      if (activeFolder) loadFolderItems(activeFolder); else load();
+    } else {
+      const d = await r.json().catch(() => ({}));
+      $('#renameErr').textContent = d.error || 'Rename failed (admin only)';
+    }
+  } catch { $('#renameErr').textContent = 'Connection failed'; }
   btn.disabled = false;
 });
 
