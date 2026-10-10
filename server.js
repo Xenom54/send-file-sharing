@@ -336,6 +336,7 @@ app.post('/api/items/audio', upload.single('audio'), (req, res) => {
     downloads: 0,
     deleted: false,
   };
+  if (req.body?.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
   backupPushUpload(it.fileName);
   megaPushUpload(it.fileName);
@@ -606,6 +607,29 @@ app.delete('/api/folders/:name', (req, res) => {
   saveFolders(); saveItems();
   log('folder_delete', `name=${name}`, req);
   res.json({ ok: true });
+});
+
+/* move an item into another folder (or out of all folders) — admin, or the
+   folder's edit rule allows anyone */
+app.put('/api/items/:id/folder', async (req, res) => {
+  const it = items.find(i => i.id === req.params.id);
+  if (!it) return res.status(404).json({ error: 'not found' });
+  const isAdmin = isAuthorized(req);
+  const targetRaw = req.body?.folder;
+  const target = targetRaw ? folderName(targetRaw) : null;
+  if (target && !folders[target]) return res.status(404).json({ error: 'no such folder' });
+  // permission: admin always; otherwise the SOURCE folder must allow edits by anyone
+  if (!isAdmin) {
+    const src = it.folder ? folders[it.folder] : null;
+    const tgt = target ? folders[target] : null;
+    const srcOk = !src || src.edit === 'anyone';
+    const tgtOk = !tgt || tgt.edit === 'anyone';
+    if (!(srcOk && tgtOk)) return res.status(401).json({ error: 'you can move items only in and out of folders that allow edits by anyone' });
+  }
+  if (target) it.folder = target; else delete it.folder;
+  saveItems();
+  log('item_move', `item=${it.id} → ${target || '(no folder)'}`, req);
+  res.json(publicItem(it));
 });
 
 /* cloud backup status for the admin dashboard */

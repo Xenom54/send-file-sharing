@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📨</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <link rel="stylesheet" href="/static/style.css?v=9">
 </head>
 <body>
   <nav class="navbar">
@@ -35,12 +35,12 @@
         <div class="row">
           <div>
             <label class="fl">Title (optional)</label>
-            <input type="text" id="textTitle" placeholder="Title…">
+            <input type="text" id="textTitle" placeholder="Title…" dir="auto">
           </div>
         </div>
         <div class="mt">
           <label class="fl">Text</label>
-          <textarea id="textBody" placeholder="Type or paste anything…"></textarea>
+          <textarea id="textBody" placeholder="Type or paste anything…" dir="auto"></textarea>
         </div>
         <div class="mt">
           <button class="btn primary" id="btnSendText">Send text →</button>
@@ -57,7 +57,7 @@
         </div>
         <div class="mt">
           <label class="fl">Title (optional)</label>
-          <input type="text" id="fileTitle" placeholder="File title…">
+          <input type="text" id="fileTitle" placeholder="File title…" dir="auto">
         </div>
         <div id="uploadQueue"></div>
       </div>
@@ -100,9 +100,11 @@
         <div class="grid" id="items"></div>
       </div>
 
-      <!-- folders sidebar (on the side, never changes the main layout) -->
-      <aside class="folders-panel card">
-        <div class="ph">Folders <span class="pill" id="folderCount">0</span></div>
+      <!-- folders panel (compact, pinned corner, collapsible) -->
+      <aside class="folders-panel card" id="foldersPanel">
+        <div class="ph">Folders <span class="pill" id="folderCount">0</span>
+          <button class="folder-toggle" id="folderToggle" title="Collapse/expand">▾</button>
+        </div>
         <div class="folder-list" id="folderList"></div>
         <button class="btn small ghost" id="btnNewFolder" style="width:100%;margin-top:10px">＋ New folder</button>
       </aside>
@@ -110,12 +112,12 @@
 
     <!-- folder view (hidden until a folder is opened) -->
     <div id="folderView" class="hidden">
-      <div class="items-head" style="margin-top:6px">
+      <div class="items-toolbar" style="margin-top:6px">
         <button class="btn small" id="btnFolderBack">← All items</button>
-        <h2 id="folderTitle" style="font-size:1.2rem;margin:0 10px">folder</h2>
+        <h2 id="folderTitle" style="font-size:1.2rem;margin:0 4px">folder</h2>
         <span class="count" id="folderItemCount"></span>
         <span class="spacer" style="flex:1"></span>
-        <button class="btn small danger hidden" id="btnFolderDelete" title="Delete folder">🗑 Delete folder</button>
+        <button class="btn small danger hidden" id="btnFolderDelete" title="Delete folder">🗑</button>
       </div>
       <div class="grid" id="folderItems"></div>
     </div>
@@ -224,11 +226,27 @@
     </div>
   </div>
 
+  <!-- move item modal -->
+  <div class="lightbox" id="moveModal">
+    <div class="card" style="max-width:380px;width:calc(100% - 32px);padding:26px">
+      <h3 style="font-size:1.05rem;font-weight:800;margin-bottom:14px">📁 Move to folder</h3>
+      <div class="field">
+        <label class="fl">Choose folder</label>
+        <select id="moveTarget"></select>
+      </div>
+      <div class="small" id="moveErr" style="color:var(--danger);min-height:16px;font-weight:600"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn" id="moveCancel" style="flex:1">Cancel</button>
+        <button class="btn primary" id="moveGo" style="flex:1">Move</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=8"></script>
-  <script src="/static/profile.js?v=8"></script>
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/notify.js?v=9"></script>
+  <script src="/static/profile.js?v=9"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>

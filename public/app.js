@@ -101,11 +101,12 @@ function itemHTML(it, i) {
   if (it.type === 'text') actions += `<button class="btn small" data-copy-text="${esc(it.text)}">⧉ Copy</button>`;
   if (it.type === 'image') actions += `<button class="btn small" data-copy-img="${url}">⧉ Copy image</button>`;
   actions += `<a class="btn small" href="${url}?download=1" download>⬇ Download${it.downloads ? ` · ${it.downloads}` : ''}</a>`;
+  actions += `<button class="btn small" data-move-item="${it.id}" title="Move to folder">📁</button>`;
   actions += `<button class="btn small danger" data-del="${it.id}" title="Delete">🗑</button>`;
   if (it.type === 'text') actions += `<button class="btn small" data-edit-item="${it.id}" title="Edit">✎</button>`;
 
   return `<div class="card item hoverable" id="item-${it.id}" style="animation-delay:${Math.min(i * 45, 400)}ms">
-    <div class="meta"><span class="badge ${it.type}">${it.type}</span><span>${esc(fmtTime(it.createdAt))}</span>${it.size ? `<span>· ${fmtSize(it.size)}</span>` : ''}</div>
+    <div class="meta"><span class="badge ${it.type}">${it.type}</span><span>${esc(fmtTime(it.createdAt))}</span>${it.size ? `<span>· ${fmtSize(it.size)}</span>` : ''}${it.folder ? `<span class="pill">📁 ${esc(it.folder)}</span>` : ''}</div>
     ${it.title ? `<h3 dir="auto">${esc(it.title)}</h3>` : ''}
     ${body}
     <div class="item-actions">${actions}</div>
@@ -169,6 +170,7 @@ $('#items').addEventListener('click', e => {
   const ci = e.target.closest('[data-copy-img]'); if (ci) return copyImage(ci.dataset.copyImg);
   const dl = e.target.closest('[data-del]'); if (dl) return delItem(dl.dataset.del);
   const ed = e.target.closest('[data-edit-item]'); if (ed) return openEditModal(ed.dataset.editItem);
+  const mv = e.target.closest('[data-move-item]'); if (mv) return openMoveModal(mv.dataset.moveItem);
   const img = e.target.closest('.zoomable');
   if (img) { $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); }
 });
@@ -227,7 +229,10 @@ async function doDelete(id) {
   if (!confirm('Delete this item? It goes to the admin recycle bin.')) return;
   try {
     const r = await fetch('/api/items/' + id, { method: 'DELETE' });
-    if (r.ok) { toast('🗑 Moved to recycle bin'); load(); }
+    if (r.ok) {
+      toast('🗑 Moved to recycle bin');
+      if (activeFolder) loadFolderItems(activeFolder); else load();
+    }
     else if (r.status === 401) openDelModal(id);
     else toast('⚠ Delete failed', 'err');
   } catch { toast('⚠ Delete failed', 'err'); }
@@ -392,9 +397,14 @@ async function saveRec() {
   const ext = (recBlob.type.includes('mp4') ? 'm4a' : recBlob.type.includes('ogg') ? 'ogg' : 'webm');
   const fd = new FormData();
   fd.append('audio', recBlob, `recording-${Date.now()}.${ext}`);
+  if (activeFolder) fd.append('folder', activeFolder);
   try {
     const r = await fetch('/api/items/audio', { method: 'POST', body: fd });
-    if (r.ok) { toast('✓ Recording saved'); $('#recList').innerHTML = ''; recBlob = null; load(); }
+    if (r.ok) {
+      toast('✓ Recording saved');
+      $('#recList').innerHTML = ''; recBlob = null;
+      if (activeFolder) loadFolderItems(activeFolder); else load();
+    }
     else toast('⚠ Failed to save recording', 'err');
   } catch { toast('⚠ Failed to save recording', 'err'); }
   btn.disabled = false; btn.textContent = '💾 Save recording';
@@ -402,8 +412,14 @@ async function saveRec() {
 
 /* ------------------------- edit text items (admin) ------------------------- */
 let editingId = null;
+let folderItemsCache = []; // items currently shown in the open folder view
+
+function findItemAnywhere(id) {
+  return items.find(x => x.id === id) || folderItemsCache.find(x => x.id === id) || null;
+}
+
 function openEditModal(id) {
-  const it = items.find(x => x.id === id);
+  const it = findItemAnywhere(id);
   if (!it || it.type !== 'text') return;
   editingId = id;
   $('#editTitle').value = it.title || '';
@@ -452,11 +468,11 @@ $('#editSave').addEventListener('click', async () => {
   btn.disabled = false; btn.textContent = 'Save';
 });
 
-/* ---------------- site notifications (uploads + public chat dot) ---------------- */
+/* ---------------- site notifications (uploads + public chat dot) ----------------
+   Sound ONLY for the public chat (while unfocused). Main-page uploads just
+   refresh silently — no sound, no toast spam. */
 const siteSocket = io({ transports: ['websocket', 'polling'] });
 siteSocket.on('site_activity', ({ kind }) => {
-  if (!Notify.active()) return;
-  Notify.play();
   if (kind === 'upload' && (document.hidden || !document.hasFocus())) load();
 });
 siteSocket.on('public_activity', () => {
@@ -484,6 +500,26 @@ function loadFolders() {
     })
     .catch(() => {});
 }
+
+/* collapse/expand the pinned folders panel (per device) */
+(function () {
+  const KEY = 'send_folders_collapsed';
+  const apply = () => {
+    const col = localStorage.getItem(KEY) === '1';
+    $('#foldersPanel')?.classList.toggle('collapsed', col);
+    const t = $('#folderToggle');
+    if (t) t.textContent = col ? '▸' : '▾';
+  };
+  document.addEventListener('DOMContentLoaded', apply);
+  setTimeout(apply, 0);
+  document.addEventListener('click', e => {
+    if (e.target.id === 'folderToggle') {
+      const col = localStorage.getItem(KEY) === '1';
+      localStorage.setItem(KEY, col ? '0' : '1');
+      apply();
+    }
+  });
+})();
 
 function renderFolders() {
   const host = $('#folderList');
@@ -580,6 +616,7 @@ async function loadFolderItems(name) {
       return;
     }
     const list = await r.json();
+    folderItemsCache = list;
     $('#folderItemCount').textContent = list.length + ' items';
     const host = $('#folderItems');
     if (!list.length) {
@@ -597,8 +634,51 @@ $('#folderItems').addEventListener('click', e => {
   const ci = e.target.closest('[data-copy-img]'); if (ci) return copyImage(ci.dataset.copyImg);
   const dl = e.target.closest('[data-del]'); if (dl) return delItem(dl.dataset.del);
   const ed = e.target.closest('[data-edit-item]'); if (ed) return openEditModal(ed.dataset.editItem);
+  const mv = e.target.closest('[data-move-item]'); if (mv) return openMoveModal(mv.dataset.moveItem);
   const img = e.target.closest('.zoomable');
   if (img) { $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); }
+});
+
+/* ------------------------- move item to folder ------------------------- */
+let movingId = null;
+function openMoveModal(id) {
+  movingId = id;
+  const it = findItemAnywhere(id);
+  if (!it) return;
+  // build the folder list (needs re-fetch in case it changed)
+  fetch('/api/folders').then(r => r.json()).then(list => {
+    foldersList = list || [];
+    const opts = ['<option value="">— No folder (main page) —</option>']
+      .concat(foldersList.map(f => `<option value="${esc(f.name)}" ${it.folder === f.name ? 'selected' : ''}>${esc(f.name)}${f.locked && !f.unlocked ? ' 🔒' : ''}</option>`))
+      .join('');
+    $('#moveTarget').innerHTML = opts;
+    $('#moveErr').textContent = '';
+    $('#moveModal').classList.add('open');
+  });
+}
+$('#moveCancel').addEventListener('click', () => $('#moveModal').classList.remove('open'));
+$('#moveModal').addEventListener('click', e => { if (e.target.id === 'moveModal') $('#moveModal').classList.remove('open'); });
+$('#moveGo').addEventListener('click', async () => {
+  if (!movingId) return;
+  const target = $('#moveTarget').value || null;
+  const btn = $('#moveGo');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/items/' + movingId + '/folder', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder: target || undefined }),
+    });
+    if (r.ok) {
+      toast(target ? `✓ Moved to ${target}` : '✓ Moved to the main page');
+      $('#moveModal').classList.remove('open');
+      if (activeFolder) loadFolderItems(activeFolder); else load();
+      loadFolders();
+    } else {
+      const d = await r.json().catch(() => ({}));
+      $('#moveErr').textContent = d.error || 'Move failed (needs admin or an open folder)';
+    }
+  } catch { $('#moveErr').textContent = 'Connection failed'; }
+  btn.disabled = false;
 });
 
 /* new folder modal */

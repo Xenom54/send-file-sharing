@@ -310,40 +310,38 @@ label.fl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: 
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 18px; }
 
-/* folders sidebar — sits beside the grid, never changes the main layout */
-.home-layout { display: flex; gap: 18px; align-items: flex-start; }
-
-/* visitor summary cards (per-IP) */
-.visitor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
-.visitor-card { padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-.vc-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.vc-head .ip { font-size: .95rem; font-weight: 700; color: #93a4ff; }
-.vc-stats { display: flex; gap: 7px; flex-wrap: wrap; }
-.vc-stat {
-  font-size: .76rem; color: var(--text-2); background: rgba(3, 4, 10, .55);
-  border: 1px solid var(--border); border-radius: 99px; padding: 4px 10px; font-weight: 600;
-}
-.vc-stat b { color: var(--text); }
-.vc-foot { border-top: 1px solid var(--border); padding-top: 8px; }
+/* folders panel — compact, collapsible, pinned to the corner; never squeezes the grid */
+.home-layout { display: block; }
 .folders-panel {
-  width: 250px; flex: none; padding: 16px;
-  position: sticky; top: 78px;
-  max-height: calc(100vh - 100px); overflow-y: auto;
+  position: fixed; right: 14px; top: 74px; z-index: 80;
+  width: 190px; padding: 12px;
+  max-height: calc(100vh - 96px); overflow-y: auto;
+  background: rgba(13, 15, 24, .92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
-.folder-list { display: flex; flex-direction: column; gap: 8px; }
+.folders-panel .ph { display: flex; align-items: center; gap: 6px; }
+.folders-panel.collapsed .folder-list,
+.folders-panel.collapsed #btnNewFolder { display: none; }
+.folder-toggle {
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  font-size: .8rem; padding: 2px 6px; border-radius: 6px; margin-left: auto;
+  transition: all .15s;
+}
+.folder-toggle:hover { color: var(--text); background: var(--surface-2); }
+.folder-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .folder-item {
-  padding: 10px 12px; border-radius: 10px; background: rgba(3, 4, 10, .5);
-  border: 1px solid var(--border); cursor: pointer; font-weight: 650; font-size: .9rem;
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 9px; background: rgba(3, 4, 10, .5);
+  border: 1px solid var(--border); cursor: pointer; font-weight: 600; font-size: .84rem;
+  display: flex; justify-content: space-between; align-items: center; gap: 6px;
   transition: all .15s; text-align: left; width: 100%;
 }
 .folder-item:hover { border-color: var(--border-2); background: rgba(3, 4, 10, .8); }
 .folder-item.active { border-color: rgba(124, 108, 255, .55); background: rgba(124, 108, 255, .12); }
 .folder-item .fi-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.folder-item .fi-meta { font-size: .68rem; color: var(--text-3); white-space: nowrap; }
-@media (max-width: 900px) {
-  .home-layout { flex-direction: column; }
-  .folders-panel { width: 100%; position: static; max-height: none; }
+.folder-item .fi-meta { font-size: .66rem; color: var(--text-3); white-space: nowrap; }
+@media (max-width: 1100px) {
+  .folders-panel { position: static; width: 100%; max-height: none; background: var(--card); }
 }
 
 .item { padding: 17px; display: flex; flex-direction: column; gap: 13px; position: relative; animation: pop .34s cubic-bezier(.2, .8, .2, 1) backwards; }
