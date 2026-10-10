@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📨</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
   <nav class="navbar">
@@ -94,8 +94,31 @@
       <button class="btn small ghost" id="btnRefresh" title="Refresh">↻</button>
     </div>
 
-    <!-- items -->
-    <div class="grid" id="items"></div>
+    <div class="home-layout">
+      <!-- main items -->
+      <div style="flex:1; min-width:0">
+        <div class="grid" id="items"></div>
+      </div>
+
+      <!-- folders sidebar (on the side, never changes the main layout) -->
+      <aside class="folders-panel card">
+        <div class="ph">Folders <span class="pill" id="folderCount">0</span></div>
+        <div class="folder-list" id="folderList"></div>
+        <button class="btn small ghost" id="btnNewFolder" style="width:100%;margin-top:10px">＋ New folder</button>
+      </aside>
+    </div>
+
+    <!-- folder view (hidden until a folder is opened) -->
+    <div id="folderView" class="hidden">
+      <div class="items-head" style="margin-top:6px">
+        <button class="btn small" id="btnFolderBack">← All items</button>
+        <h2 id="folderTitle" style="font-size:1.2rem;margin:0 10px">folder</h2>
+        <span class="count" id="folderItemCount"></span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn small danger hidden" id="btnFolderDelete" title="Delete folder">🗑 Delete folder</button>
+      </div>
+      <div class="grid" id="folderItems"></div>
+    </div>
 
     <!-- chat promo -->
     <div class="card hoverable promo">
@@ -109,8 +132,7 @@
   </div>
 
   <footer class="footer">
-    <div class="logo-sm">📨 Send · <span class="crown">👑 Crafted by Qai9rr</span></div>
-  </footer>
+    <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div></footer>
 
   <div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
 
@@ -153,11 +175,60 @@
     </div>
   </div>
 
+  <!-- new folder modal -->
+  <div class="lightbox" id="folderModal">
+    <div class="card" style="max-width:420px;width:calc(100% - 32px);padding:26px">
+      <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:14px">📁 New folder</h3>
+      <div class="field">
+        <label class="fl">Folder name</label>
+        <input type="text" id="folderNameInput" placeholder="e.g. project-files" maxlength="40" dir="auto">
+      </div>
+      <div class="field">
+        <label class="fl">Who can see it?</label>
+        <select id="folderVisibility">
+          <option value="all">Everyone</option>
+          <option value="admin">Admins only</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="fl">Who can edit items inside?</label>
+        <select id="folderEdit">
+          <option value="owner">Only me (owner) + admins</option>
+          <option value="anyone">Anyone</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="fl">Password (optional)</label>
+        <input type="password" id="folderPw" placeholder="Leave empty for no password" autocomplete="new-password">
+      </div>
+      <div class="small" id="folderErr" style="color:var(--danger);min-height:16px;font-weight:600"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn" id="folderCancel" style="flex:1">Cancel</button>
+        <button class="btn primary" id="folderCreate" style="flex:1">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- folder unlock modal -->
+  <div class="lightbox" id="folderLockModal">
+    <div class="card" style="max-width:380px;width:calc(100% - 32px);padding:26px;text-align:center">
+      <div class="lock-ic" style="margin-bottom:14px">🔒</div>
+      <h3 style="font-size:1.1rem;font-weight:800">Locked folder</h3>
+      <p class="small muted" style="margin:8px 0 14px">Enter the folder password to open it.</p>
+      <input type="password" id="folderLockPw" placeholder="Folder password" style="text-align:center">
+      <div class="small" id="folderLockErr" style="color:var(--danger);margin-top:8px;min-height:16px;font-weight:600"></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn" id="folderLockCancel" style="flex:1">Cancel</button>
+        <button class="btn primary" id="folderLockOpen" style="flex:1">Open</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=7"></script>
-  <script src="/static/profile.js?v=7"></script>
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/notify.js?v=8"></script>
+  <script src="/static/profile.js?v=8"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

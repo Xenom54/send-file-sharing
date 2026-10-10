@@ -33,7 +33,7 @@ node server.js
 | `DATA_DIR` | `./data` | where json stores live |
 | `UPLOAD_DIR` | `./uploads` | where uploaded files live |
 | `COOKIE_SECURE` | `0` | set `1` when serving over HTTPS |
-| `PRIVATE_ADMIN_PASSWORD` | `kalios` | password for the hidden /privateadmin chat super-admin |
+| `PRIVATE_ADMIN_PASSWORD` | `admin123` | password for the hidden /privateadmin chat super-admin |
 | `MEGA_EMAIL` | — | MEGA account email (primary cloud backup) |
 | `MEGA_PASSWORD` | — | MEGA account password (2FA must be off for unattended logins) |
 | `MEGA_FOLDER` | `send-backup` | folder name inside the MEGA drive |
@@ -104,6 +104,12 @@ and free HTTPS. (The site then *is* still hosted on your PC, but the URL is publ
 ### Main page (`/`)
 - Clean layout: composer first, then a toolbar with **search** + type filter chips
   (All / Text / Images / Audio / Video / Files)
+- **Folders** — a sidebar beside the grid (never changes the main layout):
+  - *anyone* can create a folder and pick its rules at creation time:
+    **who can see it** (everyone / admins only), **who can edit items inside**
+    (owner only / anyone), and an **optional password**
+  - uploading while a folder is open puts the item inside it
+  - folder owners get a secret token (delete rights); admins can moderate any folder
 - Text notes with titles
 - File upload: drag & drop, click, or **Ctrl+V paste** — up to **20 GB**, multiple at once, live progress
   (uploads this big need a stable connection; the server has no upload timeout)
@@ -136,7 +142,7 @@ and free HTTPS. (The site then *is* still hosted on your PC, but the URL is publ
 - Message history kept per room
 
 ### Private admin (`/privateadmin` — hidden, not linked anywhere)
-- Log in with the `PRIVATE_ADMIN_PASSWORD` (default: `kalios`)
+- Log in with the `PRIVATE_ADMIN_PASSWORD` (default: `admin123`)
 - Dashboard: rooms, messages, public-chat, online-now, unique-visitor and **AI stats** cards
 - Room cards show live online counts, visitor counts and last activity
 - Open any room: read every message, **see who's online now + everyone who ever entered (with IP)**,

@@ -94,28 +94,70 @@ async function loadIps() {
   try {
     ipList = await (await fetch('/api/admin/ips')).json();
     renderIps();
-  } catch { toast('⚠ Failed to load IPs', 'err'); }
+  } catch { toast('⚠ Failed to load visitors', 'err'); }
 }
 
 let ipQuery = '';
+let ipSort = 'last';
+
+const ACT_LABEL = {
+  visit: '👀', upload: '⬆️', download: '⬇️', delete: '🗑', purge: '🗑',
+  chat_join: '💬', chat_msg: '💬', chat_admin_join: '💬', ai_msg: '🤖',
+  admin_login: '🛡️', privateadmin_login: '🛡️', chat_create: '➕',
+};
+
+function ipScore(e) {
+  if (ipSort === 'hits') return e.hits;
+  if (ipSort === 'uploads') return (e.actions.upload || 0) + (e.actions.chat_image || 0);
+  if (ipSort === 'chats') return (e.actions.chat_msg || 0) + (e.actions.chat_join || 0) + (e.actions.ai_msg || 0);
+  return e.last; // recent
+}
+
 function renderIps() {
   let list = ipList;
   if (ipQuery) list = list.filter(e => String(e.ip).toLowerCase().includes(ipQuery));
-  $('#ipCount').textContent = `${list.length}${list.length !== ipList.length ? ' of ' + ipList.length : ''} IPs`;
-  $('#ipBody').innerHTML = list.length ? list.map(e => {
-    const acts = Object.entries(e.actions || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
-      .map(([a, n]) => `<span class="act ${esc(a)}">${esc(a.replace(/_/g, ' '))} ×${n}</span>`).join(' ');
-    return `<tr>
-      <td class="ip mono">${esc(e.ip)}</td>
-      <td>${e.hits}</td>
-      <td class="nowrap">${esc(fmtTime(e.first))}</td>
-      <td class="nowrap">${esc(ago(e.last))}</td>
-      <td>${acts}</td>
-      <td class="ua" title="${esc(e.ua)}">${esc(String(e.ua || '').slice(0, 44))}</td>
-    </tr>`;
-  }).join('') : `<tr><td colspan="6" class="muted" style="text-align:center;padding:34px">No IPs recorded yet.</td></tr>`;
+  list = list.slice().sort((a, b) => ipScore(b) - ipScore(a));
+
+  $('#ipCount').textContent = `${list.length}${list.length !== ipList.length ? ' of ' + ipList.length : ''} visitors`;
+
+  $('#ipCards').innerHTML = list.length ? list.map(e => {
+    const a = e.actions || {};
+    const chips = [
+      ['visits', a.visit || 0, '👀'],
+      ['uploads', (a.upload || 0) + (a.chat_image || 0), '⬆️'],
+      ['chat', (a.chat_msg || 0) + (a.chat_join || 0) + (a.ai_msg || 0), '💬'],
+      ['downloads', a.download || 0, '⬇️'],
+      ['admin', (a.admin_login || 0) + (a.privateadmin_login || 0), '🛡️'],
+      ['deletes', (a.delete || 0) + (a.purge || 0), '🗑'],
+    ].filter(([, n]) => n > 0);
+    const isBot = /bot|crawler|spider|uptime|monitor/i.test(e.ua || '');
+    const device = /mobile/i.test(e.ua || '') ? '📱 Mobile' : /tablet/i.test(e.ua || '') ? '📱 Tablet' : '💻 Desktop';
+    return `
+    <div class="card visitor-card">
+      <div class="vc-head">
+        <span class="ip mono">${esc(e.ip)}</span>
+        ${isBot ? '<span class="pill">🤖 bot</span>' : `<span class="pill">${device}</span>`}
+        <span class="spacer"></span>
+        <span class="pill ${Date.now() - e.last < 300000 ? 'ok' : ''}">${Date.now() - e.last < 300000 ? 'online now' : esc(ago(e.last))}</span>
+      </div>
+      <div class="vc-stats">
+        ${chips.map(([label, n, ic]) => `<span class="vc-stat">${ic} ${esc(label)} <b>${n}</b></span>`).join('')}
+      </div>
+      <div class="vc-foot small muted">
+        first seen ${esc(ago(e.first))} · ${e.hits} total requests
+      </div>
+    </div>`;
+  }).join('') : `<div class="card empty"><div class="emoji">🌐</div>
+    <div class="t">No visitors recorded yet</div></div>`;
 }
 $('#ipSearch').addEventListener('input', () => { ipQuery = $('#ipSearch').value.trim().toLowerCase(); renderIps(); });
+$('#ipSortChips').addEventListener('click', e => {
+  const chip = e.target.closest('[data-sort]');
+  if (!chip) return;
+  ipSort = chip.dataset.sort;
+  $$('#ipSortChips .chip').forEach(c => c.classList.toggle('active', c === chip));
+  renderIps();
+});
 
 async function loadCloud() {
   const box = $('#cloudBox');

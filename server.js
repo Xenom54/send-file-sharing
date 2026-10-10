@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 const ADMIN_PASSWORD_DEFAULT = 'admin123';
-const PRIVATE_ADMIN_PASSWORD_DEFAULT = 'kalios';
+const PRIVATE_ADMIN_PASSWORD_DEFAULT = 'admin123';
 const MAX_FILE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB
 
 [DATA_DIR, UPLOAD_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
@@ -32,6 +32,7 @@ const paths = {
   owners: path.join(DATA_DIR, 'owners.json'),
   visitors: path.join(DATA_DIR, 'visitors.json'),
   privateadmin: path.join(DATA_DIR, 'privateadmin.json'),
+  folders: path.join(DATA_DIR, 'folders.json'),
   admin: path.join(DATA_DIR, 'admin.json'),
   sessions: path.join(DATA_DIR, 'sessions.json'),
 };
@@ -53,9 +54,11 @@ const logs = readJSON(paths.logs, []);
 const chats = readJSON(paths.chats, {});
 const roomOwners = readJSON(paths.owners, {});
 const chatVisitors = readJSON(paths.visitors, {});
+const folders = readJSON(paths.folders, {});
 if (!Array.isArray(items)) items.length = 0;
 if (!roomOwners || typeof roomOwners !== 'object' || Array.isArray(roomOwners)) for (const k of Object.keys(roomOwners)) delete roomOwners[k];
 if (!chatVisitors || typeof chatVisitors !== 'object' || Array.isArray(chatVisitors)) for (const k of Object.keys(chatVisitors)) delete chatVisitors[k];
+if (!folders || typeof folders !== 'object' || Array.isArray(folders)) { for (const k of Object.keys(folders || {})) delete folders[k]; }
 
 /* private-admin password: env forces it, otherwise the stored one, else default */
 let PRIVATE_ADMIN_PASSWORD = process.env.PRIVATE_ADMIN_PASSWORD
@@ -73,6 +76,7 @@ function saveLogs() { writeJSON(paths.logs, logs); backupPush('data', 'logs.json
 function saveChats() { writeJSON(paths.chats, chats); backupPush('data', 'chats.json'); megaPush('data', 'chats.json'); }
 function saveOwners() { writeJSON(paths.owners, roomOwners); backupPush('data', 'owners.json'); megaPush('data', 'owners.json'); }
 function saveVisitors() { writeJSON(paths.visitors, chatVisitors); backupPush('data', 'visitors.json'); megaPush('data', 'visitors.json'); }
+function saveFolders() { writeJSON(paths.folders, folders); backupPush('data', 'folders.json'); megaPush('data', 'folders.json'); }
 
 /* --- GitHub backup (backup-only, fire-and-forget, debounced) --- */
 function backupName(prefix, name) { return `${prefix}/${name}`; }
@@ -220,6 +224,7 @@ function publicItem(it) {
     id: it.id, type: it.type, title: it.title, text: it.text, fileName: it.fileName,
     originalName: it.originalName, mime: it.mime, size: it.size,
     createdAt: it.createdAt, downloads: it.downloads || 0,
+    folder: it.folder || null, edited: !!it.edited,
   };
 }
 
@@ -284,6 +289,7 @@ app.post('/api/items/text', (req, res) => {
   const text = String(req.body.text || '').slice(0, 100000);
   if (!text.trim() && !title.trim()) return res.status(400).json({ error: 'empty' });
   const it = { id: newId(), type: 'text', title, text, createdAt: Date.now(), ip: req.ip, downloads: 0, deleted: false };
+  if (req.body.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
   io.emit('site_activity', { kind: 'upload' });
   log('upload', `text note: ${title || '(untitled)'}`, req);
@@ -307,6 +313,7 @@ app.post('/api/items/upload', upload.single('file'), (req, res) => {
     downloads: 0,
     deleted: false,
   };
+  if (req.body.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
   backupPushUpload(it.fileName);
   megaPushUpload(it.fileName);
@@ -501,6 +508,106 @@ app.get('/api/admin/ips', requireAdmin, (req, res) => {
   res.json([...map.values()].sort((a, b) => b.last - a.last));
 });
 
+/* ============================== FOLDERS ==============================
+   Any user can create a folder and pick its rules at creation time:
+     visibility:  'all'    → everyone sees the folder's items
+                  'admin'  → only admins see it
+     edit:        'anyone' → anyone can edit items in it
+                  'owner'  → only the folder owner + admins
+     password:     optional — entering it (once, per device) unlocks the folder
+   The owner gets a secret editToken. Folders live beside the main grid and
+   never change the main-page layout for people who don't use them.       */
+function folderName(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40); }
+
+/* list folders (each device remembers which pw-locked folders it unlocked) */
+app.get('/api/folders', (req, res) => {
+  const unlocked = [];
+  const raw = String(req.headers.cookie || '');
+  const m = raw.match(/send_f=([^;]+)/);
+  if (m) { for (const c of decodeURIComponent(m[1]).split(',')) if (c) unlocked.push(c); }
+  const isAdmin = isAuthorized(req);
+  const list = Object.values(folders)
+    .filter(f => f.visibility !== 'admin' || isAdmin) // hide admin-only folders from normal users
+    .map(f => ({
+      name: f.name,
+      locked: !!f.pw,
+      unlocked: !f.pw || isAdmin || unlocked.includes(f.name),
+      visibility: f.visibility,
+      edit: f.edit,
+      mine: false, // filled client-side via localStorage ownerToken
+      items: items.filter(i => !i.deleted && i.folder === f.name).length,
+    })).sort((a, b) => b.items - a.items);
+  res.json(list);
+});
+
+/* create a folder (anyone) */
+app.post('/api/folders/:name', (req, res) => {
+  const name = folderName(req.params.name);
+  const pw = String(req.body?.pw || '').slice(0, 100);
+  const visibility = ['all', 'admin'].includes(req.body?.visibility) ? req.body.visibility : 'all';
+  const edit = ['anyone', 'owner'].includes(req.body?.edit) ? req.body.edit : 'owner';
+  if (!name) return res.status(400).json({ error: 'invalid folder name' });
+  if (folders[name]) return res.status(409).json({ error: 'name already taken' });
+  if ((visibility === 'admin' || pw) && !isAuthorized(req)) {
+    return res.status(401).json({ error: 'admin-only visibility/password needs an admin session' });
+  }
+  const token = crypto.randomBytes(16).toString('hex');
+  folders[name] = { name, pw: pw ? crypto.createHash('sha256').update(pw).digest('hex') : null, visibility, edit, ownerToken: token, createdAt: Date.now(), ip: req.ip };
+  saveFolders();
+  log('folder_create', `name=${name} visibility=${visibility} edit=${edit}${pw ? ' +pw' : ''}`, req);
+  res.json({ ok: true, ownerToken: token });
+});
+
+/* unlock a password-protected folder (returns a cookie remembering the unlock) */
+app.post('/api/folders/:name/unlock', (req, res) => {
+  const name = folderName(req.params.name);
+  const f = folders[name];
+  if (!f) return res.status(404).json({ error: 'no such folder' });
+  if (!f.pw) return res.json({ ok: true });
+  if (isAuthorized(req)) return res.json({ ok: true });
+  const given = crypto.createHash('sha256').update(String(req.body?.pw || '')).digest('hex');
+  if (given !== f.pw) { log('folder_unlock', `name=${name} FAILED`, req); return res.status(401).json({ error: 'wrong password' }); }
+  const raw = String(req.headers.cookie || '');
+  const m = raw.match(/send_f=([^;]+)/);
+  const list = m ? decodeURIComponent(m[1]).split(',').filter(Boolean) : [];
+  if (!list.includes(name)) list.push(name);
+  log('folder_unlock', `name=${name} ok`, req);
+  res.append('Set-Cookie', `send_f=${encodeURIComponent(list.join(','))}; Max-Age=2592000; Path=/; SameSite=Lax`);
+  res.json({ ok: true });
+});
+
+/* folder-scoped items list (respects visibility + unlock) */
+app.get('/api/folders/:name/items', (req, res) => {
+  const name = folderName(req.params.name);
+  const f = folders[name];
+  if (!f) return res.status(404).json({ error: 'no such folder' });
+  const isAdmin = isAuthorized(req);
+  if (f.visibility === 'admin' && !isAdmin) return res.status(403).json({ error: 'admin only' });
+  if (f.pw && !isAdmin) {
+    const raw = String(req.headers.cookie || '');
+    const m = raw.match(/send_f=([^;]+)/);
+    const unlocked = m ? decodeURIComponent(m[1]).split(',').filter(Boolean) : [];
+    if (!unlocked.includes(name)) return res.status(401).json({ error: 'folder locked' });
+  }
+  const list = items.filter(i => !i.deleted && i.folder === name).sort((a, b) => b.createdAt - a.createdAt).map(publicItem);
+  res.json(list);
+});
+
+/* delete a folder (owner or admin) — its items go back to the main page */
+app.delete('/api/folders/:name', (req, res) => {
+  const name = folderName(req.params.name);
+  const f = folders[name];
+  if (!f) return res.status(404).json({ error: 'no such folder' });
+  const isAdmin = isAuthorized(req);
+  const token = String(req.query.token || '');
+  if (!isAdmin && f.ownerToken !== token) return res.status(401).json({ error: 'only the folder owner or an admin' });
+  delete folders[name];
+  for (const it of items) if (it.folder === name) delete it.folder;
+  saveFolders(); saveItems();
+  log('folder_delete', `name=${name}`, req);
+  res.json({ ok: true });
+});
+
 /* cloud backup status for the admin dashboard */
 app.get('/api/admin/cloud', requireAdmin, async (req, res) => {
   const out = { mega: { configured: mega.configured() }, github: backup.info() };
@@ -546,12 +653,12 @@ app.put('/api/items/:id/text', requireAdmin, (req, res) => {
 
 /* ---------------------------- private chat (io) --------------------------- */
 function chatHistory(room) {
-  return (chats[room] || []).slice(-200);
+  return (chats[room] || []).slice(-400);
 }
 function saveChat(room, msg) {
   if (!chats[room]) chats[room] = [];
   chats[room].push(msg);
-  if (chats[room].length > 500) chats[room] = chats[room].slice(-500);
+  if (chats[room].length > 1000) chats[room] = chats[room].slice(-1000);
   saveChats();
 }
 
@@ -874,6 +981,7 @@ const RESTORE_DATA_FILES = [
   ['visitors.json', paths.visitors],
   ['privateadmin.json', paths.privateadmin],
   ['kali.json', path.join(DATA_DIR, 'kali.json')],
+  ['folders.json', path.join(DATA_DIR, 'folders.json')],
 ];
 
 /* MEGA first (full fidelity), GitHub fills any still-missing files */

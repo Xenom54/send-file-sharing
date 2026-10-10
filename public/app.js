@@ -243,11 +243,12 @@ $('#btnSendText').addEventListener('click', async () => {
   try {
     const r = await fetch('/api/items/text', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, text }),
+      body: JSON.stringify({ title, text, folder: activeFolder || undefined }),
     });
     if (r.ok) {
       $('#textTitle').value = ''; $('#textBody').value = '';
-      toast('✓ Text saved'); load();
+      toast('✓ Text saved');
+      if (activeFolder) loadFolderItems(activeFolder); else load();
     } else toast('⚠ Failed to save text', 'err');
   } catch { toast('⚠ Failed to save text', 'err'); }
   btn.disabled = false; btn.textContent = 'Send text →';
@@ -287,6 +288,7 @@ function uploadOne(file) {
   const fd = new FormData();
   fd.append('file', file);
   fd.append('title', $('#fileTitle').value.trim() || file.name);
+  if (activeFolder) fd.append('folder', activeFolder);
 
   const xhr = new XMLHttpRequest();
   xhr.open('POST', '/api/items/upload');
@@ -303,7 +305,7 @@ function uploadOne(file) {
       status.textContent = '✓ Uploaded';
       row.style.borderColor = 'rgba(52, 211, 153, .45)';
       toast(`✓ ${file.name} uploaded`);
-      load();
+      if (activeFolder) loadFolderItems(activeFolder); else load();
     } else {
       status.textContent = '✕ Failed: ' + (xhr.statusText || 'rejected by server');
       row.style.borderColor = 'rgba(251, 113, 133, .45)';
@@ -468,5 +470,212 @@ siteSocket.on('public_activity', () => {
 /* ---------------- profile: first-visit name + navbar chip ---------------- */
 Profile.ensureModal().then(() => Profile.chip('#nameChipHost'));
 document.addEventListener('profile:name', () => { /* chip re-renders itself */ });
+
+/* ============================== FOLDERS ============================== */
+let foldersList = [];
+let activeFolder = null; // null = main view
+
+function loadFolders() {
+  return fetch('/api/folders')
+    .then(r => r.json())
+    .then(list => {
+      foldersList = list || [];
+      renderFolders();
+    })
+    .catch(() => {});
+}
+
+function renderFolders() {
+  const host = $('#folderList');
+  host.innerHTML = foldersList.length ? foldersList.map(f => {
+    const mine = !!localStorage.getItem('send_foldertok_' + f.name);
+    const icons = [
+      f.locked && !f.unlocked ? '🔒' : '📁',
+      f.visibility === 'admin' ? '🛡️' : '',
+      f.edit === 'anyone' ? '✎' : '',
+      mine ? '★' : '',
+    ].join('');
+    return `<button class="folder-item ${f.name === activeFolder ? 'active' : ''}" data-folder="${esc(f.name)}">
+      <span class="fi-name">${icons} ${esc(f.name)}</span>
+      <span class="fi-meta">${f.items}</span>
+    </button>`;
+  }).join('') : '<div class="small muted">No folders yet — create one! Anything you upload while a folder is open lands inside it.</div>';
+  $('#folderCount').textContent = foldersList.length;
+}
+
+$('#folderList').addEventListener('click', e => {
+  const it = e.target.closest('[data-folder]');
+  if (it) openFolder(it.dataset.folder);
+});
+
+async function openFolder(name) {
+  const f = foldersList.find(x => x.name === name);
+  if (!f) return;
+  if (f.locked && !f.unlocked) {
+    // ask for the folder password
+    return new Promise(resolve => {
+      $('#folderLockPw').value = '';
+      $('#folderLockErr').textContent = '';
+      $('#folderLockModal').classList.add('open');
+      setTimeout(() => $('#folderLockPw').focus(), 60);
+      $('#folderLockOpen').onclick = async () => {
+        const r = await fetch(`/api/folders/${encodeURIComponent(name)}/unlock`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pw: $('#folderLockPw').value }),
+        });
+        if (r.ok) {
+          $('#folderLockModal').classList.remove('open');
+          await loadFolders();
+          showFolder(name);
+        } else {
+          $('#folderLockErr').textContent = 'Wrong password';
+          $('#folderLockPw').value = '';
+        }
+      };
+      $('#folderLockCancel').onclick = () => $('#folderLockModal').classList.remove('open');
+    });
+  }
+  showFolder(name);
+}
+
+function showFolder(name) {
+  activeFolder = name;
+  const f = foldersList.find(x => x.name === name) || {};
+  $('#folderTitle').textContent = '📁 ' + name;
+  const canDelete = isAdmin || !!localStorage.getItem('send_foldertok_' + name);
+  $('#btnFolderDelete').classList.toggle('hidden', !canDelete);
+  $('#btnFolderDelete').onclick = async () => {
+    if (!confirm(`Delete folder "${name}"? Items inside return to the main page.`)) return;
+    const token = localStorage.getItem('send_foldertok_' + name) || '';
+    const r = await fetch(`/api/folders/${encodeURIComponent(name)}?token=${encodeURIComponent(token)}`, { method: 'DELETE' });
+    if (r.ok) {
+      localStorage.removeItem('send_foldertok_' + name);
+      activeFolder = null;
+      loadFolders(); showMainView();
+    } else toast('⚠ Delete failed', 'err');
+  };
+  renderFolders();
+  // switch the view
+  $('.home-layout').classList.add('hidden');
+  $('#folderView').classList.remove('hidden');
+  loadFolderItems(name);
+}
+
+function showMainView() {
+  activeFolder = null;
+  $('.home-layout').classList.remove('hidden');
+  $('#folderView').classList.add('hidden');
+  renderFolders();
+}
+
+$('#btnFolderBack').addEventListener('click', showMainView);
+
+async function loadFolderItems(name) {
+  try {
+    const r = await fetch(`/api/folders/${encodeURIComponent(name)}/items`);
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      toast('⚠ ' + (d.error || 'Cannot open folder'), 'err');
+      showMainView();
+      return;
+    }
+    const list = await r.json();
+    $('#folderItemCount').textContent = list.length + ' items';
+    const host = $('#folderItems');
+    if (!list.length) {
+      host.innerHTML = `<div class="card empty" style="grid-column:1/-1"><div class="emoji">📁</div>
+        <div class="t">Empty folder</div><div>Upload something while this folder is open and it lands here.</div></div>`;
+      return;
+    }
+    host.innerHTML = list.map((it, i) => itemHTML(it, i)).join('');
+  } catch { toast('⚠ Failed to load folder', 'err'); }
+}
+
+/* folder items: reuse the main grid handlers for copy/download/delete/edit */
+$('#folderItems').addEventListener('click', e => {
+  const ct = e.target.closest('[data-copy-text]'); if (ct) return copyText(ct.dataset.copyText);
+  const ci = e.target.closest('[data-copy-img]'); if (ci) return copyImage(ci.dataset.copyImg);
+  const dl = e.target.closest('[data-del]'); if (dl) return delItem(dl.dataset.del);
+  const ed = e.target.closest('[data-edit-item]'); if (ed) return openEditModal(ed.dataset.editItem);
+  const img = e.target.closest('.zoomable');
+  if (img) { $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); }
+});
+
+/* new folder modal */
+$('#btnNewFolder').addEventListener('click', () => {
+  $('#folderNameInput').value = '';
+  $('#folderPw').value = '';
+  $('#folderErr').textContent = '';
+  $('#folderModal').classList.add('open');
+  setTimeout(() => $('#folderNameInput').focus(), 60);
+});
+$('#folderCancel').addEventListener('click', () => $('#folderModal').classList.remove('open'));
+$('#folderModal').addEventListener('click', e => { if (e.target.id === 'folderModal') $('#folderModal').classList.remove('open'); });
+
+$('#folderCreate').addEventListener('click', async () => {
+  const name = $('#folderNameInput').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (!name) { $('#folderErr').textContent = 'Enter a name (letters, numbers, -)'; return; }
+  const body = {
+    visibility: $('#folderVisibility').value,
+    edit: $('#folderEdit').value,
+    pw: $('#folderPw').value || undefined,
+  };
+  const btn = $('#folderCreate');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/folders/' + encodeURIComponent(name), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) {
+      localStorage.setItem('send_foldertok_' + name, d.ownerToken);
+      $('#folderModal').classList.remove('open');
+      toast('✓ Folder created');
+      loadFolders();
+    } else {
+      // admin-locked options need an admin session — ask for the password inline
+      if (r.status === 401) {
+        const pw = prompt('Admin password needed for that option:');
+        if (pw) {
+          const lr = await fetch('/api/admin/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }),
+          });
+          if (lr.ok) {
+            isAdmin = true;
+            const r2 = await fetch('/api/folders/' + encodeURIComponent(name), {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+            const d2 = await r2.json().catch(() => ({}));
+            if (r2.ok) {
+              localStorage.setItem('send_foldertok_' + name, d2.ownerToken);
+              $('#folderModal').classList.remove('open');
+              toast('✓ Folder created');
+              loadFolders();
+            } else $('#folderErr').textContent = d2.error || 'Failed';
+          } else $('#folderErr').textContent = 'Wrong admin password';
+        }
+      } else $('#folderErr').textContent = d.error || 'Failed to create';
+    }
+  } catch { $('#folderErr').textContent = 'Connection failed'; }
+  btn.disabled = false;
+});
+
+/* the composer title row gets a small "into folder" hint when one is open */
+const origRender = render;
+render = function () {
+  origRender();
+  const hint = document.querySelector('#activeFolderHint');
+  if (hint) hint.remove();
+  if (activeFolder) {
+    const el = document.createElement('div');
+    el.id = 'activeFolderHint';
+    el.className = 'small';
+    el.style.cssText = 'margin:-8px 0 14px;color:#93a4ff;font-weight:650';
+    el.textContent = `📁 Uploading into "${activeFolder}" — click ← All items to leave`;
+    document.querySelector('.composer').after(el);
+  }
+};
+
+loadFolders();
 
 load();

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
   <nav class="navbar">
@@ -84,21 +84,22 @@
       </div>
     </div>
 
-    <!-- ============ VISITORS (IPs) ============ -->
+    <!-- ============ VISITORS (per-IP summary) ============ -->
     <div class="apane hidden" id="apane-visitors">
       <div class="items-toolbar">
         <div class="search-box">
           <span class="search-ic">🔍</span>
           <input type="text" id="ipSearch" placeholder="Search IP…" autocomplete="off">
         </div>
+        <div class="chips" id="ipSortChips">
+          <button class="chip active" data-sort="last">Recent</button>
+          <button class="chip" data-sort="hits">Most active</button>
+          <button class="chip" data-sort="uploads">Uploaders</button>
+          <button class="chip" data-sort="chats">Chatters</button>
+        </div>
         <span class="count" id="ipCount"></span>
       </div>
-      <div class="card tablewrap">
-        <table class="logtable">
-          <thead><tr><th>IP address</th><th>Hits</th><th>First seen</th><th>Last seen</th><th>Top actions</th><th>User agent</th></tr></thead>
-          <tbody id="ipBody"></tbody>
-        </table>
-      </div>
+      <div class="visitor-grid" id="ipCards"></div>
     </div>
 
     <!-- ============ ACTIVITY ============ -->
@@ -189,9 +190,8 @@
   </div>
 
   <footer class="footer" style="margin-top:40px">
-    <div class="logo-sm">?? Send � <span class="crown">?? Crafted by Qai9rr</span></div>
-  </footer>
+    <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div></footer>
   <div class="toasts" id="toasts"></div>
-  <script src="/static/admin.js?v=7"></script>
+  <script src="/static/admin.js?v=8"></script>
 </body>
 </html>
