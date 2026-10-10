@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=10">
+  <link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
   <nav class="navbar">
@@ -165,6 +165,15 @@
           <button class="btn primary" id="btnChangePrivateAdminPw">Update password</button>
           <p class="small muted mt">Used for the hidden <code>/privateadmin</code> chat moderation panel.</p>
         </div>
+        <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">📡</span> Stream-admin password</div>
+          <div class="field">
+            <label class="fl">New stream-admin password</label>
+            <input type="password" id="newStreamAdminPw" placeholder="At least 4 characters" autocomplete="new-password">
+          </div>
+          <button class="btn primary" id="btnChangeStreamAdminPw">Update password</button>
+          <p class="small muted mt">Used for the hidden <code>/streamadmin</code> panel (secret stream watching).</p>
+        </div>
       </div>
 
       <div class="card pane-card" style="margin-top:18px">
@@ -192,6 +201,6 @@
   <footer class="footer" style="margin-top:40px">
     <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div></footer>
   <div class="toasts" id="toasts"></div>
-  <script src="/static/admin.js?v=10"></script>
+  <script src="/static/admin.js?v=12"></script>
 </body>
 </html>

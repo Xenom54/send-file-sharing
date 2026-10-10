@@ -714,6 +714,15 @@ app.post('/api/admin/privateadmin-password', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+/* stream-admin password (secret stream watcher) */
+app.post('/api/admin/streamadmin-password', requireAdmin, (req, res) => {
+  const pw = String(req.body?.password || '');
+  if (pw.length < 4) return res.status(400).json({ error: 'too short (min 4)' });
+  setStreamAdminPassword(pw);
+  log('streamadmin_pw_change', 'stream-admin password changed', req);
+  res.json({ ok: true });
+});
+
 /* Kali (AI bot) configuration: personality + on/off (admin-editable) */
 app.get('/api/admin/kali-config', requireAdmin, (req, res) => res.json(kali.getConfig()));
 app.post('/api/admin/kali-config', requireAdmin, (req, res) => {
@@ -742,41 +751,63 @@ app.put('/api/items/:id/text', requireAdmin, (req, res) => {
 });
 
 /* ---------------------------- private chat (io) --------------------------- */
+/* History is paginated (PAGE msgs at a time). Deleted messages are marked
+   (deleted:true), NOT removed — the site hides them but MEGA/GitHub backups
+   keep every message forever ("memories").                                */
+const CHAT_PAGE = 100;
 function chatHistory(room) {
-  return (chats[room] || []).slice(-400);
+  const all = (chats[room] || []).filter(m => !m.deleted);
+  return { msgs: all.slice(-CHAT_PAGE), hasMore: all.length > CHAT_PAGE };
+}
+function chatHistoryOlder(room, before) {
+  const all = (chats[room] || []).filter(m => !m.deleted);
+  const older = all.filter(m => m.ts < before);
+  const chunk = older.slice(-CHAT_PAGE);
+  return { msgs: chunk, hasMore: older.length > chunk.length };
 }
 function saveChat(room, msg) {
   if (!chats[room]) chats[room] = [];
   chats[room].push(msg);
-  if (chats[room].length > 1000) chats[room] = chats[room].slice(-1000);
+  if (chats[room].length > 1500) chats[room] = chats[room].slice(-1500); // cap live file (incl. deleted kept for backups)
   saveChats();
 }
 
-/* ---- chat image upload ---- */
+/* ---- chat upload: images, voice notes, and general files ---- */
 const chatStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
     let ext = (path.extname(file.originalname) || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
-    // if no usable extension (e.g. pasted clipboard image), derive from mime type
     if (!ext) {
-      const byMime = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp', 'image/bmp': '.bmp', 'image/avif': '.avif' };
-      ext = byMime[file.mimetype] || '.png';
+      const byMime = {
+        'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif',
+        'image/webp': '.webp', 'image/bmp': '.bmp', 'image/avif': '.avif',
+        'audio/webm': '.webm', 'audio/ogg': '.ogg', 'audio/mp3': '.mp3',
+        'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/wav': '.wav',
+      };
+      ext = byMime[file.mimetype] || '.bin';
     }
     cb(null, `chat-${Date.now()}-${newId()}${ext}`);
   },
 });
 const chatUpload = multer({
   storage: chatStorage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB per chat image
-  fileFilter: (req, file, cb) => cb(null, !!file.mimetype.startsWith('image/')),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB per chat file
+  fileFilter: (req, file, cb) => {
+    const bad = /\.(html?|js|svg|exe|bat|cmd|ps1|sh)$/i;
+    if (bad.test(file.originalname)) return cb(null, false);
+    cb(null, true);
+  },
 });
 
-app.post('/api/chat/upload', chatUpload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'no image or type rejected' });
+app.post('/api/chat/upload', chatUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'no file or type rejected' });
   backupPushUpload(req.file.filename);
   megaPushUpload(req.file.filename);
-  log('chat_image', req.file.originalname, req);
-  res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename) });
+  const kind = req.file.mimetype.startsWith('image/') ? 'image'
+    : req.file.mimetype.startsWith('audio/') ? 'audio'
+    : req.file.mimetype.startsWith('video/') ? 'video' : 'file';
+  log('chat_image', `${kind}: ${req.file.originalname}`, req);
+  res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename), kind, name: req.file.originalname, size: req.file.size });
 });
 
 const server = http.createServer(app);
@@ -992,10 +1023,14 @@ io.on('connection', (socket) => {
       liveStreams[c] = {
         code: c, hostId: socket.id, hostName: String(data?.name || 'anonymous').slice(0, 30),
         pw: data?.pw ? hashPw(String(data.pw)) : null, viewers: new Map(), startedAt: Date.now(),
+        chat: [],
       };
       streamRole = 'host';
       streamJoined = c;
       socket.data.streamCode = c;
+      socket.data.streamName = String(data?.name || 'anonymous').slice(0, 30);
+      socket.join('stream:' + c); // the host is part of the room → sees the mini chat too
+      socket.emit('stream_chat_history', liveStreams[c].chat || []);
       io.emit('stream_update', { streams: streamListPublic() });
       log('stream_start', `code=${c} host=${data?.name}${data?.pw ? ' +pw' : ''}`, reqLikeS());
       if (ack) ack({ ok: true, code: c });
@@ -1016,7 +1051,9 @@ io.on('connection', (socket) => {
       streamRole = 'viewer';
       streamJoined = c;
       socket.data.streamCode = c;
+      socket.data.streamName = s.viewers.get(socket.id).name;
       io.to(s.hostId).emit('stream_viewer', { id: socket.id, name: s.viewers.get(socket.id).name, count: s.viewers.size });
+      socket.emit('stream_chat_history', s.chat || []);
       io.emit('stream_update', { streams: streamListPublic() });
       log('stream_join', `code=${c} name=${data?.name}`, reqLikeS());
       if (ack) ack({ ok: true, code: c, host: s.hostName, hostId: s.hostId });
@@ -1034,10 +1071,30 @@ io.on('connection', (socket) => {
       streamRole = 'admin';
       streamJoined = c;
       socket.data.streamCode = c;
+      socket.data.streamName = 'admin';
       io.to(s.hostId).emit('stream_viewer', { id: socket.id, name: '(hidden)', secret: true, count: s.viewers.size });
+      socket.emit('stream_chat_history', s.chat || []);
       log('stream_admin_watch', `code=${c} (secret)`, reqLikeS());
       if (ack) ack({ ok: true, code: c, host: s.hostName, hostId: s.hostId });
     } catch (e) { console.error('[stream admin join]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  /* stream mini chat: text + images, shared by host and viewers */
+  socket.on('stream_chat', (data) => {
+    try {
+    if (!streamJoined || !liveStreams[streamJoined]) return;
+    const s = liveStreams[streamJoined];
+    const msg = {
+      ts: Date.now(), id: newId(),
+      name: streamRole === 'host' ? s.hostName : (socket.data.streamName || 'guest'),
+      text: String(data?.text || '').slice(0, 2000),
+      image: String(data?.image || '').slice(0, 2000) || null,
+    };
+    if (!msg.text.trim() && !msg.image) return;
+    s.chat.push(msg);
+    if (s.chat.length > 100) s.chat.shift();
+    io.to('stream:' + streamJoined).emit('stream_chat', msg);
+    } catch (e) { console.error('[stream chat]', e.message); }
   });
 
   /* WebRTC signaling relay — both directions */
@@ -1147,15 +1204,19 @@ io.on('connection', (socket) => {
     if (!t.trim() && !img) return;
     const msg = { ts: Date.now(), name, text: t, id: newId(), uid: socket.data.uid };
     if (img) msg.image = img;
+    const aud = String(data?.audio || '').slice(0, 2000);
+    if (aud) { msg.audio = aud; msg.fname = String(data?.fname || 'voice').slice(0, 120); msg.fsize = Number(data?.fsize) || 0; }
+    const cf = String(data?.cfile || '').slice(0, 2000);
+    if (cf) { msg.cfile = cf; msg.fname = String(data?.fname || 'file').slice(0, 120); msg.fsize = Number(data?.fsize) || 0; }
     if (isPrivateAdmin) msg.admin = true;
     if (data?.replyTo && typeof data.replyTo === 'string') {
-      const orig = (chats[room] || []).find(m => m.id === data.replyTo);
+      const orig = (chats[room] || []).find(m => m.id === data.replyTo && !m.deleted);
       if (orig) msg.replyTo = { id: orig.id, name: orig.name, text: String(orig.text || '').slice(0, 80) };
     }
     saveChat(room, msg);
     io.to(room).emit('msg', msg);
     if (room === 'public') io.emit('public_activity', { room });
-    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}${msg.replyTo ? ' +reply' : ''}`, reqLike());
+    log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}${aud ? ' +audio' : ''}${cf ? ' +file' : ''}${msg.replyTo ? ' +reply' : ''}`, reqLike());
     maybeKaliReply(room, name, t, reqLike());
     } catch (e) { console.error('[io msg]', e.message); }
   });
@@ -1178,19 +1239,30 @@ io.on('connection', (socket) => {
     } catch (e) { console.error('[io editmsg]', e.message); }
   });
 
-  /* delete a single message: own messages always; any message if private admin */
+  /* delete a single message: own messages always; any message if private admin.
+     Messages are MARKED deleted, never removed — the site hides them but
+     MEGA/GitHub backups keep every message forever. */
   socket.on('delmsg', (data) => {
     try {
     if (!room) return;
-    const list = chats[room] || [];
-    const i = list.findIndex(m => m.id === data?.id);
-    if (i === -1) return;
-    if (!isPrivateAdmin && list[i].uid !== socket.data.uid) return;
-    list.splice(i, 1);
+    const m = (chats[room] || []).find(x => x.id === data?.id);
+    if (!m || m.deleted) return;
+    if (!isPrivateAdmin && m.uid !== socket.data.uid) return;
+    m.deleted = true;
+    m.deletedAt = Date.now();
     saveChats();
-    io.to(room).emit('delmsg', { id: data.id });
-    log('chat_msg_del', `room=${room} by=${isPrivateAdmin ? 'admin' : name}`, reqLike());
+    io.to(room).emit('delmsg', { id: m.id });
+    log('chat_msg_del', `room=${room} by=${isPrivateAdmin ? 'admin' : name} (archived in backups)`, reqLike());
     } catch (e) { console.error('[io delmsg]', e.message); }
+  });
+
+  /* lazy history: older pages on demand when the user scrolls up */
+  socket.on('history_more', (data, ack) => {
+    try {
+    if (!room) return ack && ack({ msgs: [], hasMore: false });
+    const before = Number(data?.before) || Date.now();
+    ack && ack(chatHistoryOlder(room, before));
+    } catch (e) { console.error('[io history_more]', e.message); ack && ack({ msgs: [], hasMore: false }); }
   });
 
   socket.on('typing', (isTyping) => {

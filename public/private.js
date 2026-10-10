@@ -38,7 +38,25 @@ let replyTarget = null; // { id, name, text }
 let lastMsgs = [];
 let pendingSilentHistory = false; // set while a silent (reconnect) rejoin is in flight
 
-/* ---------------- drafts: typed text survives reconnects AND page reloads -------------- */
+/* rooms panel collapse (per device) — saves horizontal space */
+(function () {
+  const KEY = 'send_rooms_collapsed';
+  const apply = () => {
+    const col = localStorage.getItem(KEY) === '1';
+    $('#chatPanel')?.classList.toggle('collapsed', col);
+    $('#panelToggle').textContent = col ? '▸' : '▾';
+  };
+  setTimeout(apply, 0);
+  document.addEventListener('click', e => {
+    if (e.target.id === 'panelToggle') {
+      const col = localStorage.getItem(KEY) === '1';
+      localStorage.setItem(KEY, col ? '0' : '1');
+      apply();
+    }
+  });
+})();
+
+/* drafts: typed text survives reconnects AND page reloads -------------- */
 function saveDraft() {
   try {
     if (currentRoom) {
@@ -314,26 +332,73 @@ $('#msgInput').addEventListener('paste', e => {
   if (files.length) { e.preventDefault(); sendImage(files[0]); }
 });
 
-async function sendImage(file) {
-  if (!file.type.startsWith('image/')) return toast('⚠ Images only', 'err');
-  if (file.size > 25 * 1024 * 1024) return toast('⚠ Image too large (max 25 MB)', 'err');
-  const btn = $('#btnImage');
-  btn.disabled = true;
-  toast('📎 Uploading image…');
+/* ---------------------- attachments: image / file / voice ---------------------- */
+$('#btnImage').addEventListener('click', () => $('#imageInput').click());
+$('#imageInput').addEventListener('change', () => {
+  const f = $('#imageInput').files[0];
+  if (f) sendChatFile(f);
+  $('#imageInput').value = '';
+});
+$('#msgInput').addEventListener('paste', e => {
+  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (files.length) { e.preventDefault(); sendChatFile(files[0], 'image'); }
+});
+
+async function sendChatFile(file, forceKind) {
+  const kind = forceKind || (file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : 'file');
+  if (file.size > 25 * 1024 * 1024) return toast('⚠ Too large (max 25 MB)', 'err');
+  toast(kind === 'image' ? '📎 Uploading image…' : kind === 'audio' ? '📎 Sending voice note…' : '📎 Uploading file…');
   const fd = new FormData();
-  fd.append('image', file);
+  fd.append('file', file);
   try {
     const r = await fetch('/api/chat/upload', { method: 'POST', body: fd });
     const d = await r.json();
     if (!r.ok) return toast('⚠ Upload failed: ' + (d.error || ''), 'err');
-    socket.emit('msg', { text: '', image: d.url });
+    if (d.kind === 'image') socket.emit('msg', { text: '', image: d.url });
+    else if (d.kind === 'audio') socket.emit('msg', { text: '', audio: d.url, fname: d.name, fsize: d.size });
+    else socket.emit('msg', { text: '', cfile: d.url, fname: d.name, fsize: d.size });
   } catch { toast('⚠ Upload failed', 'err'); }
-  finally { btn.disabled = false; }
 }
+
+/* voice notes in chat: tap 🎙 to start, tap again to send */
+let chatRec = null, chatRecChunks = [], chatRecTimer = null, chatRecStart = 0;
+$('#btnVoice').addEventListener('click', async () => {
+  if (chatRec && chatRec.state === 'recording') {
+    chatRec.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chatRecChunks = [];
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+    chatRec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    chatRec.addEventListener('dataavailable', e => { if (e.data.size) chatRecChunks.push(e.data); });
+    chatRec.addEventListener('stop', () => {
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(chatRecTimer);
+      $('#btnVoice').classList.remove('recording');
+      $('#btnVoice').title = 'Record voice note';
+      const blob = new Blob(chatRecChunks, { type: mime || 'audio/webm' });
+      if (blob.size > 800) {
+        const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
+        sendChatFile(new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type }), 'audio');
+      }
+    });
+    chatRec.start();
+    chatRecStart = Date.now();
+    $('#btnVoice').classList.add('recording');
+    $('#btnVoice').title = 'Recording… tap to send';
+    chatRecTimer = setInterval(() => {
+      const s = Math.floor((Date.now() - chatRecStart) / 1000);
+      $('#btnVoice').title = `Recording ${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')} — tap to send`;
+    }, 500);
+  } catch { toast('⚠ Microphone access denied', 'err'); }
+});
 
 /* ------------------------------ msg rendering ----------------------------- */
 function actionsHTML(m, mine) {
-  const canEdit = (mine || iAmAdmin) && !m.bot && !m.image;
+  // hover actions for EVERY message type: edit (own text), reply (all), delete (own/admin)
+  const canEdit = (mine || iAmAdmin) && !m.bot && !!m.text && !m.image && !m.audio && !m.cfile;
   const canDelete = mine || iAmAdmin;
   let out = '';
   if (canEdit) out += `<button class="msg-act msg-edit" data-edit="${m.id}" title="Edit">✎</button>`;
@@ -342,28 +407,44 @@ function actionsHTML(m, mine) {
   return out;
 }
 
-function bubbleHTML(m, mine) {
-  const img = m.image
-    ? `<img src="${esc(m.image)}" alt="image" class="chat-img zoomable" data-full="${esc(m.image)}">`
-    : '';
-  const txt = m.text
-    ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}</div>`
-    : (m.image ? '' : '<div class="msg-text muted">(empty)</div>');
-  const quote = m.replyTo
-    ? `<div class="reply-quote" dir="auto"><b>${esc(m.replyTo.name)}</b><br>${esc(m.replyTo.text)}</div>` : '';
-  return `${img}${quote}${txt}${actionsHTML(m, mine)}`;
+function fmtChatSize(b) {
+  return b == null ? '' : (b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB');
 }
 
-function appendMsg(m, mine) {
+function bubbleHTML(m, mine) {
+  let media = '';
+  if (m.image) media = `<img src="${esc(m.image)}" alt="image" class="chat-img zoomable" data-full="${esc(m.image)}">`;
+  else if (m.audio) media = `<audio controls preload="metadata" src="${esc(m.audio)}" class="chat-audio"></audio>`;
+  else if (m.cfile) media = `<a class="chat-file" href="${esc(m.cfile)}?download=1" download>
+      <span class="cf-ic">📄</span>
+      <span><span class="cf-nm">${esc(m.fname || 'file')}</span><span class="cf-sz">${fmtChatSize(m.fsize)} · download</span></span>
+    </a>`;
+  const txt = m.text
+    ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}</div>`
+    : (media ? '' : '<div class="msg-text muted">(empty)</div>');
+  const quote = m.replyTo
+    ? `<div class="reply-quote" dir="auto"><b>${esc(m.replyTo.name)}</b><br>${esc(m.replyTo.text)}</div>` : '';
+  return `${media}${quote}${txt}${actionsHTML(m, mine)}`;
+}
+
+/* message grouping: same sender within 5 minutes → name shown only once */
+let lastRendered = null; // {uid, ts, kind}
+function appendMsg(m, mine, opts = {}) {
   const el = document.createElement('div');
-  el.className = 'msg' + (mine ? ' mine' : '') + (m.admin ? ' admin-msg' : '') + (m.bot ? ' bot-msg' : '');
+  const grouped = !opts.prepend && lastRendered && !lastRendered.sys &&
+    lastRendered.uid === m.uid && lastRendered.name === m.name && (m.ts - lastRendered.ts) < 5 * 60e3;
+  el.className = 'msg' + (mine ? ' mine' : '') + (m.admin ? ' admin-msg' : '') + (m.bot ? ' bot-msg' : '') + (grouped ? ' msg-grouped' : '');
   el.dataset.mid = m.id;
   const who = m.bot ? 'Kali' : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}${mine ? ' (you)' : ''}`;
-  el.innerHTML = `<div class="who">${who}</div>
+  el.innerHTML = `${grouped ? '' : `<div class="who">${who}</div>`}
     <div class="bubble">${bubbleHTML(m, mine)}</div>
     <div class="time">${esc(fmtTime(m.ts))}</div>`;
-  $('#messages').appendChild(el);
-  $('#messages').scrollTop = $('#messages').scrollHeight;
+  if (opts.prepend) $('#messages').prepend(el);
+  else {
+    $('#messages').appendChild(el);
+    $('#messages').scrollTop = $('#messages').scrollHeight;
+  }
+  if (!m.deleted) lastRendered = { uid: m.uid, name: m.name, ts: m.ts, sys: false };
 }
 function appendSys(m) {
   const el = document.createElement('div');
@@ -371,6 +452,7 @@ function appendSys(m) {
   el.innerHTML = `<span>${esc((m.kind === 'join' ? '→ ' : m.kind === 'leave' ? '← ' : '⚠ ') + m.text)}</span>`;
   $('#messages').appendChild(el);
   $('#messages').scrollTop = $('#messages').scrollHeight;
+  lastRendered = { sys: true };
 }
 
 /* render one existing message's bubble (used by edit/cancel) */
@@ -528,8 +610,9 @@ $('#btnNewRoom').addEventListener('click', async () => {
 socket.on('connect', () => {
   if (currentRoom) joinRoom(currentRoom, { silent: true });
 });
-socket.on('history', list => {
-  list = list || [];
+socket.on('history', (h) => {
+  const list = h?.msgs || h || [];
+  const hasMore = !!h?.hasMore;
   const wasSilent = pendingSilentHistory;
   pendingSilentHistory = false;
   // silent rejoin with NO new messages → do absolutely nothing (zero visual change)
@@ -538,9 +621,32 @@ socket.on('history', list => {
     (list.length === 0 || (list[0].id === lastMsgs[0]?.id && list[list.length - 1].id === lastMsgs[lastMsgs.length - 1]?.id));
   if (unchanged) return;
   lastMsgs = list;
+  historyExhausted = !hasMore;
+  loadingMore = false;
+  lastRendered = null;
   $('#messages').innerHTML = '';
   lastMsgs.forEach(m => appendMsg(m, m.uid === store.uid));
   $('#messages').scrollTop = $('#messages').scrollHeight;
+});
+
+/* lazy load: when the user scrolls near the top, fetch the older chunk */
+let historyExhausted = false;
+let loadingMore = false;
+$('#messages').addEventListener('scroll', async () => {
+  const box = $('#messages');
+  if (box.scrollTop > 120 || historyExhausted || loadingMore || !currentRoom || !lastMsgs.length) return;
+  loadingMore = true;
+  const oldest = lastMsgs[0].ts;
+  socket.emit('history_more', { before: oldest }, (d) => {
+    loadingMore = false;
+    if (!d || !d.msgs || !d.msgs.length) { historyExhausted = true; return; }
+    historyExhausted = !d.hasMore;
+    lastMsgs = d.msgs.concat(lastMsgs);
+    // prepend while keeping the scroll position stable
+    const beforeH = box.scrollHeight;
+    d.msgs.slice().reverse().forEach(m => appendMsg(m, m.uid === store.uid, { prepend: true }));
+    box.scrollTop += box.scrollHeight - beforeH;
+  });
 });
 socket.on('msg', m => {
   if (!lastMsgs.some(x => x.id === m.id)) {

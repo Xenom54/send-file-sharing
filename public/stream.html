@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Stream</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=10">
+  <link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
   <nav class="navbar">
@@ -92,12 +92,31 @@
       <span class="pill ok" id="liveDot">● LIVE</span>
       <span class="count" id="viewerCount">0 viewers</span>
       <span class="spacer" style="flex:1"></span>
-      <button class="btn small danger" id="btnStopStream">⏹ Stop stream</button>
+      <button class="btn small" id="btnPreview" title="Show/hide your preview (avoid the mirror loop)">👁</button>
+      <button class="btn small danger" id="btnStopStream">⏹ Stop</button>
     </div>
-    <div class="card" style="padding:14px">
-      <video id="hostPreview" autoplay muted playsinline style="width:100%;border-radius:12px;background:#000"></video>
+    <div class="stream-layout">
+      <div style="flex:1;min-width:0">
+        <div class="card" style="padding:14px">
+          <video id="hostPreview" autoplay muted playsinline style="width:100%;border-radius:12px;background:#000;display:none"></video>
+          <div id="hostNoPreview" class="small muted" style="padding:40px;text-align:center">
+            👁 Preview hidden — this prevents the infinite-mirror effect when you share your full screen.<br>
+            Click the 👁 button to peek at what you're streaming.
+          </div>
+        </div>
+        <div class="small muted" style="margin-top:10px">Share this link: <span class="mono" id="shareLink" style="color:#93a4ff;user-select:all"></span></div>
+      </div>
+      <aside class="card stream-chat">
+        <div class="ph">Stream chat <span class="pill" id="scCount">0</span></div>
+        <div class="sc-messages" id="scMessages"></div>
+        <div class="sc-input">
+          <button class="btn icon" id="scImg" title="Send image">🖼️</button>
+          <input type="text" id="scInput" placeholder="Say something…" maxlength="2000" dir="auto">
+          <button class="btn small primary" id="scSend">➤</button>
+          <input type="file" id="scFile" accept="image/*" hidden>
+        </div>
+      </aside>
     </div>
-    <div class="small muted" style="margin-top:10px">Share this link: <span class="mono" id="shareLink" style="color:#93a4ff;user-select:all"></span></div>
   </div>
 
   <!-- stream view (viewer) -->
@@ -107,10 +126,26 @@
       <h2 style="font-size:1.3rem;margin:0" id="watchTitle">stream</h2>
       <span class="pill ok">● LIVE</span>
       <span class="spacer" style="flex:1"></span>
+      <button class="btn small" id="btnMic" title="Talk to the streamer (mic)">🎙️</button>
+      <button class="btn small" id="btnFullscreen" title="Fullscreen">⛶</button>
       <button class="btn small" id="btnLeaveStream">Leave</button>
     </div>
-    <div class="card" style="padding:14px">
-      <video id="viewerVideo" autoplay playsinline style="width:100%;border-radius:12px;background:#000"></video>
+    <div class="stream-layout">
+      <div style="flex:1;min-width:0">
+        <div class="card" style="padding:14px">
+          <video id="viewerVideo" autoplay playsinline style="width:100%;border-radius:12px;background:#000"></video>
+        </div>
+      </div>
+      <aside class="card stream-chat">
+        <div class="ph">Stream chat</div>
+        <div class="sc-messages" id="scMessagesViewer"></div>
+        <div class="sc-input">
+          <button class="btn icon" id="scImgV" title="Send image">🖼️</button>
+          <input type="text" id="scInputV" placeholder="Say something…" maxlength="2000" dir="auto">
+          <button class="btn small primary" id="scSendV">➤</button>
+          <input type="file" id="scFileV" accept="image/*" hidden>
+        </div>
+      </aside>
     </div>
   </div>
 
@@ -120,8 +155,8 @@
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=10"></script>
-  <script src="/static/profile.js?v=10"></script>
-  <script src="/static/stream.js?v=10"></script>
+  <script src="/static/notify.js?v=12"></script>
+  <script src="/static/profile.js?v=12"></script>
+  <script src="/static/stream.js?v=12"></script>
 </body>
 </html>

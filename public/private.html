@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Chat</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=11">
+  <link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
   <nav class="navbar">
@@ -49,8 +49,8 @@
   <!-- chat -->
   <div class="wrap hidden" id="chatWrap">
     <div class="chat-app">
-      <div class="card panel">
-        <div class="ph">Rooms</div>
+      <div class="card panel" id="chatPanel">
+        <div class="ph">Rooms <button class="panel-toggle" id="panelToggle" title="Collapse/expand">▾</button></div>
         <button class="room-item" id="roomPublic" data-goto="public">
           <span><span class="unread-dot hidden" id="dotPublic"></span> 🌍 Public chat</span><span class="code">everyone</span>
         </button>
@@ -60,7 +60,7 @@
         <div class="room-list" id="roomList" style="margin-top:8px"></div>
         <button class="btn small ghost mt" id="btnNewRoom" style="width:100%;margin-top:12px">＋ New private room</button>
 
-        <div class="small muted" style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;line-height:1.6">
+        <div class="small muted panel-hint" style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;line-height:1.6">
           Summon Kali anywhere: <b>@kali</b>
         </div>
 
@@ -90,6 +90,7 @@
         </div>
         <div class="chat-input">
           <button class="btn icon" id="btnImage" title="Send an image">🖼️</button>
+          <button class="btn icon" id="btnVoice" title="Record a voice note">🎙️</button>
           <input type="text" id="msgInput" placeholder="Type a message…" autocomplete="off" maxlength="4000" dir="auto">
           <button class="btn primary" id="btnSend">Send</button>
           <input type="file" id="imageInput" accept="image/*" hidden>
@@ -121,8 +122,8 @@
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=11"></script>
-  <script src="/static/profile.js?v=11"></script>
-  <script src="/static/private.js?v=11"></script>
+  <script src="/static/notify.js?v=12"></script>
+  <script src="/static/profile.js?v=12"></script>
+  <script src="/static/private.js?v=12"></script>
 </body>
 </html>

@@ -358,6 +358,19 @@ $('#btnChangePrivateAdminPw').addEventListener('click', async () => {
   }
 });
 
+$('#btnChangeStreamAdminPw').addEventListener('click', async () => {
+  const pw = $('#newStreamAdminPw').value;
+  if (pw.length < 4) return toast('⚠ Password too short (min 4)', 'err');
+  const r = await fetch('/api/admin/streamadmin-password', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }),
+  });
+  if (r.ok) { toast('✓ Stream-admin password updated'); $('#newStreamAdminPw').value = ''; }
+  else {
+    const d = await r.json().catch(() => ({}));
+    toast('⚠ ' + (d.error || 'Failed to change password'), 'err');
+  }
+});
+
 /* ---------------------------- Kali bot settings ---------------------------- */
 async function loadKaliConfig() {
   try {
