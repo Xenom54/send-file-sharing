@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Stream</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=16">
+  <link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body>
   <nav class="navbar">
@@ -105,6 +105,19 @@
             Click the 👁 button to peek at what you're streaming.
           </div>
         </div>
+        <!-- shown only when the screen share carries no audio (Linux/macOS full-screen) -->
+        <div id="noAudioHint" class="card hidden" style="margin-top:10px;padding:14px;border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.07)">
+          <div style="font-weight:700;color:#fbbf24">🔇 Your screen share has no sound</div>
+          <div class="small muted" style="margin:6px 0 10px;line-height:1.6">
+            Browsers on Linux & macOS can't capture full-screen system audio — that's a platform limit, not a bug.
+            Two easy fixes:
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn small primary" id="btnMicFallback">🎙️ Talk with your mic</button>
+            <button class="btn small" id="btnHintRestart">↻ Restart & share a browser tab</button>
+          </div>
+          <div class="small muted" style="margin-top:8px">Sharing a <b>tab</b> includes its sound on every system. Your mic also works while viewers watch.</div>
+        </div>
         <div class="small muted" style="margin-top:10px">Share this link: <span class="mono" id="shareLink" style="color:#93a4ff;user-select:all"></span></div>
       </div>
       <aside class="card stream-chat">
@@ -156,8 +169,8 @@
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=16"></script>
-  <script src="/static/profile.js?v=16"></script>
-  <script src="/static/stream.js?v=16"></script>
+  <script src="/static/notify.js?v=17"></script>
+  <script src="/static/profile.js?v=17"></script>
+  <script src="/static/stream.js?v=17"></script>
 </body>
 </html>

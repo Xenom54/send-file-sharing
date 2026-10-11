@@ -83,6 +83,13 @@ $('#hostGo').addEventListener('click', async () => {
     btn.disabled = false; btn.textContent = 'Start streaming';
     return;
   }
+  // AUDIO CHECK: Linux & macOS browsers cannot capture full-screen system
+  // audio (a platform limitation — Windows can). Detect the missing track
+  // and guide the host to the two working alternatives.
+  const hasAudioTrack = localStream.getAudioTracks().length > 0;
+  const hint = $('#noAudioHint');
+  if (hint) hint.classList.toggle('hidden', hasAudioTrack);
+  if (!hasAudioTrack) toast('🔇 No audio in this share — press 🎙️ to talk, or share a browser tab to include its sound', 'err');
   socket.emit('stream_start', { code, pw, name: myName() }, (ack) => {
     btn.disabled = false; btn.textContent = 'Start streaming';
     if (!ack || ack.error) { $('#hostErr').textContent = ack?.error || 'failed to start'; localStream.getTracks().forEach(t => t.stop()); localStream = null; return; }
@@ -119,6 +126,7 @@ function cleanupHost() {
   localStream?.getTracks().forEach(t => t.stop());
   localStream = null;
   $('#scMessages').innerHTML = '';
+  $('#noAudioHint')?.classList.add('hidden');
   role = null; myCode = null;
   previewShown = false;
   $('#hostPreview').style.display = 'none';
@@ -313,14 +321,14 @@ async function makeOutVoice(peerId) {
 async function startMic() {
   try {
     myMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    if (!peers.size) {
-      myMicStream.getTracks().forEach(t => t.stop());
-      myMicStream = null;
-      return toast('⚠ No one else is here yet — turn the mic on when someone joins', 'err');
-    }
-    for (const id of peers) await makeOutVoice(id);
     micOn = true;
     (role === 'host' ? $('#btnHostMic') : $('#btnMic')).classList.add('mic-on');
+    if (!peers.size) {
+      // nobody here yet — keep the mic ON: addPeer() auto-connects each
+      // viewer the moment they join (important for the Linux audio fallback)
+      return toast('🎙️ Mic on — it connects as soon as someone joins');
+    }
+    for (const id of peers) await makeOutVoice(id);
     toast('🎙️ Everyone can hear you now');
   } catch { toast('⚠ Microphone access denied', 'err'); }
 }
@@ -465,6 +473,26 @@ $('#btnPreview').addEventListener('click', () => {
   previewShown = !previewShown;
   $('#hostPreview').style.display = previewShown ? '' : 'none';
   $('#hostNoPreview').style.display = previewShown ? 'none' : '';
+});
+
+/* no-audio guidance (Linux/macOS full-screen): quick actions from the hint */
+$('#btnMicFallback').addEventListener('click', () => {
+  if (role === 'host') micOn ? stopMic() : startMic();
+});
+$('#btnHintRestart').addEventListener('click', () => {
+  if (role !== 'host') return;
+  // stop the current share & stream, back to the go-live modal with the same code
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  socket.emit('stream_stop', {}, () => {});
+  cleanupHost();
+  $('#gate').classList.remove('hidden');
+  $('#hostView').classList.add('hidden');
+  $('#noAudioHint').classList.add('hidden');
+  $('#hostCode').value = myCode || genCode();
+  $('#hostPw').value = lastHostPw || '';
+  $('#hostErr').textContent = 'Tip: choose a browser TAB in the picker to include its sound.';
+  $('#hostModal').classList.add('open');
+  setTimeout(() => $('#hostPw').focus(), 60);
 });
 
 socket.on('stream_ended', ({ reason }) => {

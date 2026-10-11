@@ -71,14 +71,19 @@ node server.js
 - **WebRTC peer-to-peer** screen sharing — the video never touches the server
 - Host gets a share link (`/stream#code`) + an **optional stream password**
 - **Mini chat** beside the stream: host + viewers, text and images (paste too)
-- **Voice chat both ways**: viewers press 🎙️ to talk to the streamer, the streamer
-  presses 🎣 🎙️ to talk to everyone — dedicated audio channels, video never renegotiates
+- **Voice chat is a full mesh**: everyone hears everyone — viewers press 🎙️ to
+  talk (to the streamer *and* each other), the streamer presses 🎙️ to talk to all
 - **Blip-proof**: a dropped connection never kills a stream (15 s host grace +
   automatic re-adopt; viewers silently rejoin)
 - Host preview is hidden by default to prevent the infinite-mirror effect; 👁 to peek
 - Fullscreen button for viewers; the host sees the live viewer count
 - **`/streamadmin`** (hidden): watch any stream invisibly (`(hidden)` in the host's
   list) and force-stop any stream — password changeable from `/admin`
+
+> **Note on screen audio**: Windows captures full-screen system sound automatically.
+> Browsers on **Linux & macOS cannot capture full-screen system audio** (a platform
+> limitation). Share a browser **tab** to include its sound, or use the host mic 🎙️ —
+> the site detects a silent share and shows a one-click fallback panel.
 
 ### Private chat (`/private`)
 - Public room + private rooms (create or join by code, share `/private#roomcode`)
