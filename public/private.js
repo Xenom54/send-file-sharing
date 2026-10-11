@@ -412,13 +412,22 @@ function fmtChatSize(b) {
   return b == null ? '' : (b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB');
 }
 
+/* heal filenames that were stored as latin1-misread UTF-8 (Arabic mojibake) */
+function healName(s) {
+  if (!s || !/[\u0080-\u00FF]/.test(s)) return s || '';
+  try {
+    const bytes = new Uint8Array([...s].map(c => c.charCodeAt(0) & 0xFF));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch { return s; }
+}
+
 function bubbleHTML(m, mine) {
   let media = '';
   if (m.image) media = `<img src="${esc(m.image)}" alt="image" class="chat-img zoomable" data-full="${esc(m.image)}">`;
   else if (m.audio) media = `<audio controls preload="metadata" src="${esc(m.audio)}" class="chat-audio"></audio>`;
   else if (m.cfile) media = `<a class="chat-file" href="${esc(m.cfile)}?download=1" download>
       <span class="cf-ic">📄</span>
-      <span><span class="cf-nm">${esc(m.fname || 'file')}</span><span class="cf-sz">${fmtChatSize(m.fsize)} · download</span></span>
+      <span><span class="cf-nm">${esc(healName(m.fname) || 'file')}</span><span class="cf-sz">${fmtChatSize(m.fsize)} · download</span></span>
     </a>`;
   const txt = m.text
     ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}</div>`

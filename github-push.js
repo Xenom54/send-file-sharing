@@ -12,7 +12,7 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); console.log('  done', f.path); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const MSG = 'v15: FULL VOICE MESH in streams - everyone hears everyone (viewer<->viewer too). Server sends peer lists + room-wide join/leave events; pcDir-tagged signaling can never cross wires. Quality: 8Mbps, no downscale, contentHint=detail.';
+  const MSG = 'Arabic (and any non-ASCII) filenames fixed: latin1->UTF-8 restore on every upload path, RFC 5987 download headers (real Arabic save names), old mojibake items healed on display server-side and client-side in chat';
   const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);

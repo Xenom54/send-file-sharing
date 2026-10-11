@@ -228,10 +228,29 @@ const EXT_BY_MIME = {
   'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/mp4': '.m4a', 'audio/x-m4a': '.m4a',
 };
 
+/* --------------------- filename helpers (Arabic/UTF-8) ---------------------
+   Some multipart parsers hand over UTF-8 bytes misread as latin1, turning
+   Arabic names into mojibake (ØµÙˆØ±Ø©.png). The heuristic: a correctly
+   decoded Arabic name contains Arabic codepoints (not latin1-supplement
+   chars), so if we see \u0080-\u00FF we restore the real UTF-8 name.      */
+function fixUploadName(n) {
+  if (!n) return n;
+  if (/[\u0080-\u00FF]/.test(n)) {
+    const fixed = Buffer.from(n, 'latin1').toString('utf8');
+    if (!fixed.includes('\uFFFD')) return fixed;
+  }
+  return n;
+}
+/* RFC 5987: real Arabic download names in every browser, ASCII fallback too */
+function cdAttachment(name) {
+  const fallback = String(name).replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 function publicItem(it) {
   return {
     id: it.id, type: it.type, title: it.title, text: it.text, fileName: it.fileName,
-    originalName: it.originalName, mime: it.mime, size: it.size,
+    originalName: fixUploadName(it.originalName), mime: it.mime, size: it.size,
     createdAt: it.createdAt, downloads: it.downloads || 0,
     folder: it.folder || null, edited: !!it.edited,
   };
@@ -322,15 +341,16 @@ app.post('/api/items/text', (req, res) => {
 });
 
 app.post('/api/items/upload', upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'no file or rejected type' });
+  if (!req.file) return res.status(400).json({ error: 'no file or type rejected' });
+  const originalName = fixUploadName(req.file.originalname);
   const it = {
     id: newId(),
     type: req.file.mimetype.startsWith('image/') ? 'image'
       : req.file.mimetype.startsWith('audio/') ? 'audio'
       : req.file.mimetype.startsWith('video/') ? 'video' : 'file',
-    title: req.body.title ? String(req.body.title).slice(0, 200) : req.file.originalname,
+    title: req.body.title ? String(req.body.title).slice(0, 200) : originalName,
     fileName: req.file.filename,
-    originalName: req.file.originalname,
+    originalName,
     mime: req.file.mimetype,
     size: req.file.size,
     createdAt: Date.now(),
@@ -353,7 +373,7 @@ app.post('/api/items/audio', upload.single('audio'), (req, res) => {
     type: 'audio',
     title: req.body.title ? String(req.body.title).slice(0, 200) : `Recording ${new Date().toLocaleString()}`,
     fileName: req.file.filename,
-    originalName: req.file.originalname || 'recording.webm',
+    originalName: fixUploadName(req.file.originalname) || 'recording.webm',
     mime: req.file.mimetype,
     size: req.file.size,
     createdAt: Date.now(),
@@ -406,11 +426,11 @@ app.get('/uploads/:filename', async (req, res) => {
   if (risky) {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`);
+    res.setHeader('Content-Disposition', cdAttachment(name));
     return res.sendFile(p);
   }
   if (req.query.download === '1') {
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`);
+    res.setHeader('Content-Disposition', cdAttachment(name));
     if (it) { it.downloads = (it.downloads || 0) + 1; saveItems(); log('download', name, req); }
   } else {
     res.setHeader('Content-Disposition', 'inline');
@@ -809,11 +829,12 @@ app.post('/api/chat/upload', chatUpload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no file or type rejected' });
   backupPushUpload(req.file.filename);
   megaPushUpload(req.file.filename);
+  const originalName = fixUploadName(req.file.originalname);
   const kind = req.file.mimetype.startsWith('image/') ? 'image'
     : req.file.mimetype.startsWith('audio/') ? 'audio'
     : req.file.mimetype.startsWith('video/') ? 'video' : 'file';
-  log('chat_image', `${kind}: ${req.file.originalname}`, req);
-  res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename), kind, name: req.file.originalname, size: req.file.size });
+  log('chat_image', `${kind}: ${originalName}`, req);
+  res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename), kind, name: originalName, size: req.file.size });
 });
 
 const server = http.createServer(app);
