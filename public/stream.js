@@ -25,6 +25,8 @@ let hostPc = null;               // host side: single connection per viewer? —
 const viewerPcs = new Map();     // host: viewerId → RTCPeerConnection
 let viewerPc = null;             // viewer side: single PC to the host
 let hostId = null;
+let lastJoinPw = '';  // viewer: remember the stream password for silent rejoins
+let lastHostPw = '';  // host: remember for re-adopting after a reconnect
 let STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
 
 function genCode() {
@@ -80,6 +82,8 @@ $('#hostGo').addEventListener('click', async () => {
     if (!ack || ack.error) { $('#hostErr').textContent = ack?.error || 'failed to start'; localStream.getTracks().forEach(t => t.stop()); localStream = null; return; }
     role = 'host';
     myCode = ack.code;
+    lastHostPw = pw;
+    if (!ack.reAdopted) viewerPcs.clear(); // fresh start (a re-adopt keeps existing viewer PCs)
     $('#hostModal').classList.remove('open');
     $('#gate').classList.add('hidden');
     $('#hostView').classList.remove('hidden');
@@ -102,6 +106,11 @@ function cleanupHost() {
   viewerPcs.clear();
   voicePcs.forEach(({ pc, audio }) => { pc.close(); audio.remove(); });
   voicePcs.clear();
+  hostVoicePcs.forEach(pc => pc.close());
+  hostVoicePcs.clear();
+  hostMicStream?.getTracks().forEach(t => t.stop());
+  hostMicStream = null; hostMicOn = false;
+  $('#btnHostMic').classList.remove('mic-on');
   localStream?.getTracks().forEach(t => t.stop());
   localStream = null;
   $('#scMessages').innerHTML = '';
@@ -165,6 +174,7 @@ $('#watchGo').addEventListener('click', () => {
     role = 'viewer';
     myCode = ack.code;
     hostId = ack.hostId;
+    lastJoinPw = $('#watchPw').value;
     $('#watchModal').classList.remove('open');
     $('#gate').classList.add('hidden');
     $('#watchView').classList.remove('hidden');
@@ -179,6 +189,11 @@ function cleanupViewer() {
   viewerPc?.close();
   viewerPc = null;
   $('#viewerVideo').srcObject = null;
+  if (viewerHostAudio) {
+    viewerHostAudio.pc?.close();
+    viewerHostAudio.remove();
+    viewerHostAudio = null;
+  }
   $('#scMessagesViewer').innerHTML = '';
   role = null; myCode = null; hostId = null;
 }
@@ -197,9 +212,9 @@ async function ensureViewerPc() {
   return pc;
 }
 
-/* signaling router (both roles) — also handles the VOICE channel
-   (voice offers arrive with data.voice=true and use their own PCs) */
-const voicePcs = new Map(); // host side: viewerId → {pc, audio}
+/* signaling router (both roles) — also routes the VOICE channel
+   (voice offers arrive with data.voice=true and use their own PCs,
+   declared in the voice section below) */
 socket.on('stream_signal', async ({ from, data }) => {
   try {
     if (data?.voice) return handleVoiceSignal(from, data);
@@ -225,45 +240,81 @@ socket.on('stream_signal', async ({ from, data }) => {
 });
 
 /* ============================ VOICE (mic) ============================
-   Viewer toggles mic → creates a dedicated audio-only PC → offer flows to
-   the host → the host answers and plays the viewer's voice.               */
-async function handleVoiceSignal(from, data) {
-  if (role === 'host') {
-    if (data.sdp && data.sdp.type === 'offer') {
-      let entry = voicePcs.get(from);
-      if (!entry) {
-        const pc = new RTCPeerConnection(STUN);
-        const audio = document.createElement('audio');
-        audio.autoplay = true;
-        audio.style.display = 'none';
-        document.body.appendChild(audio);
-        pc.addEventListener('track', e => { audio.srcObject = e.streams[0]; });
-        pc.addEventListener('icecandidate', e => {
-          if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, candidate: e.candidate } });
-        });
-        entry = { pc, audio };
-        voicePcs.set(from, entry);
-        toast('🎙️ A viewer started talking');
-      }
-      await entry.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-      const answer = await entry.pc.createAnswer();
-      await entry.pc.setLocalDescription(answer);
-      socket.emit('stream_signal', { to: from, data: { voice: true, sdp: entry.pc.localDescription } });
-    } else if (data.candidate) {
-      const entry = voicePcs.get(from);
-      if (entry) { try { await entry.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
-    }
-  } else if (role === 'viewer' && data.sdp && data.sdp.type === 'answer') {
-    const vpc = micPc;
-    if (vpc) { try { await vpc.setRemoteDescription(new RTCSessionDescription(data.sdp)); } catch {} }
-  } else if (role === 'viewer' && data.candidate && micPc) {
-    try { await micPc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
-  }
+   BOTH directions, each on dedicated audio-only PCs (marked voice:true):
+   - viewer 🎙️ → offer to the host → host answers + plays the audio
+   - host 🎙️ → one PC per viewer → offer to every viewer → they play it
+   The stream's video PC is never touched → no renegotiation problems.   */
+const voicePcs = new Map();      // host side: viewerId → {pc, audio} (viewer→host)
+const hostVoicePcs = new Map();  // host side: viewerId → pc (host→viewer)
+let hostMicStream = null, hostMicOn = false;
+let viewerHostAudio = null;      // viewer side: audio element for the host's voice
+
+function playAudioEl(audio) {
+  audio.play?.().catch(() => { /* autoplay guard: retried on the next track event */ });
 }
 
+async function handleVoiceSignal(from, data) {
+  try {
+    if (role === 'host') {
+      if (data.sdp && data.sdp.type === 'offer') {
+        let entry = voicePcs.get(from);
+        if (!entry) {
+          const pc = new RTCPeerConnection(STUN);
+          const audio = document.createElement('audio');
+          audio.autoplay = true;
+          audio.style.display = 'none';
+          document.body.appendChild(audio);
+          pc.addEventListener('track', e => { audio.srcObject = e.streams[0]; playAudioEl(audio); });
+          pc.addEventListener('icecandidate', e => {
+            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, candidate: e.candidate } });
+          });
+          entry = { pc, audio };
+          voicePcs.set(from, entry);
+          toast('🎙️ A viewer started talking');
+        }
+        await entry.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        const answer = await entry.pc.createAnswer();
+        await entry.pc.setLocalDescription(answer);
+        socket.emit('stream_signal', { to: from, data: { voice: true, sdp: entry.pc.localDescription } });
+      } else if (data.candidate) {
+        const entry = voicePcs.get(from);
+        if (entry) { try { await entry.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+      }
+    } else if (role === 'viewer') {
+      if (data.sdp && data.sdp.type === 'offer') {
+        // the HOST is talking: answer and play their voice
+        if (!viewerHostAudio) {
+          viewerHostAudio = document.createElement('audio');
+          viewerHostAudio.autoplay = true;
+          viewerHostAudio.style.display = 'none';
+          document.body.appendChild(viewerHostAudio);
+        }
+        if (!viewerHostAudio.pc) {
+          const pc = new RTCPeerConnection(STUN);
+          viewerHostAudio.pc = pc;
+          pc.addEventListener('track', e => { viewerHostAudio.srcObject = e.streams[0]; playAudioEl(viewerHostAudio); });
+          pc.addEventListener('icecandidate', e => {
+            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, candidate: e.candidate } });
+          });
+        }
+        await viewerHostAudio.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        const answer = await viewerHostAudio.pc.createAnswer();
+        await viewerHostAudio.pc.setLocalDescription(answer);
+        socket.emit('stream_signal', { to: from, data: { voice: true, sdp: viewerHostAudio.pc.localDescription } });
+      } else if (data.sdp && data.sdp.type === 'answer') {
+        if (micPc) { try { await micPc.setRemoteDescription(new RTCSessionDescription(data.sdp)); } catch {} }
+      } else if (data.candidate) {
+        if (viewerHostAudio?.pc) { try { await viewerHostAudio.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+        if (micPc) { try { await micPc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+      }
+    }
+  } catch (e) { console.error('[voice]', e.message); }
+}
+
+/* ---- viewer mic (talk to the streamer) ---- */
 let micPc = null, micStream = null, micOn = false;
 $('#btnMic').addEventListener('click', async () => {
-  if (!role) return;
+  if (role !== 'viewer') return;
   if (micOn) return stopMic();
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -287,6 +338,54 @@ function stopMic() {
   $('#btnMic').classList.remove('mic-on');
   $('#btnMic').title = 'Talk to the streamer (mic)';
 }
+
+/* ---- HOST mic (talk to ALL viewers) ---- */
+async function makeHostVoicePc(viewerId) {
+  if (hostVoicePcs.has(viewerId)) return hostVoicePcs.get(viewerId);
+  const pc = new RTCPeerConnection(STUN);
+  hostVoicePcs.set(viewerId, pc);
+  hostMicStream.getTracks().forEach(t => pc.addTrack(t, hostMicStream));
+  pc.addEventListener('icecandidate', e => {
+    if (e.candidate) socket.emit('stream_signal', { to: viewerId, data: { voice: true, candidate: e.candidate } });
+  });
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit('stream_signal', { to: viewerId, data: { voice: true, sdp: pc.localDescription } });
+  return pc;
+}
+$('#btnHostMic').addEventListener('click', async () => {
+  if (role !== 'host') return;
+  if (hostMicOn) return stopHostMic();
+  if (!viewerPcs.size) return toast('⚠ No viewers yet — they can hear you once they join', 'err');
+  try {
+    hostMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const vid of viewerPcs.keys()) await makeHostVoicePc(vid);
+    hostMicOn = true;
+    $('#btnHostMic').classList.add('mic-on');
+    $('#btnHostMic').title = 'Mic ON — click to stop';
+    toast('🎙️ You are talking to your viewers');
+  } catch { toast('⚠ Microphone access denied', 'err'); }
+});
+function stopHostMic() {
+  hostMicStream?.getTracks().forEach(t => t.stop());
+  hostVoicePcs.forEach(pc => pc.close());
+  hostVoicePcs.clear();
+  hostMicStream = null; hostMicOn = false;
+  $('#btnHostMic').classList.remove('mic-on');
+  $('#btnHostMic').title = 'Talk to your viewers (mic)';
+}
+/* a new viewer joins while the host mic is on → spin a voice PC for them too */
+socket.on('stream_viewer', ({ id }) => {
+  if (role === 'host' && hostMicOn && hostMicStream) makeHostVoicePc(id).catch(() => {});
+});
+/* viewer left → drop their voice PCs */
+socket.on('stream_viewer_left', ({ id }) => {
+  if (role !== 'host') return;
+  const v = voicePcs.get(id);
+  if (v) { v.pc.close(); v.audio.remove(); voicePcs.delete(id); }
+  const hv = hostVoicePcs.get(id);
+  if (hv) { hv.close(); hostVoicePcs.delete(id); }
+});
 
 /* fullscreen */
 $('#btnFullscreen').addEventListener('click', () => {
@@ -383,4 +482,26 @@ if (location.hash.length > 1) {
   if (code) { $('#watchCode').value = code; openWatch(); }
 }
 
-socket.on('connect', () => socket.emit('stream_list', (d) => d && renderLive(d.streams)));
+/* ============ silent rejoin: a socket blip must never kill the stream ============
+   WebRTC media keeps flowing on its own. When the signaling socket comes
+   back we just re-register server-side (same code + same password):
+   - host: the server re-adopts the stream (15s grace server-side)
+   - viewer: rejoin quietly and pick up the fresh hostId for signaling      */
+socket.on('stream_host', ({ hostId: hid }) => {
+  if (role === 'viewer') hostId = hid;
+});
+socket.on('connect', () => {
+  if (role === 'host' && myCode) {
+    socket.emit('stream_start', { code: myCode, pw: lastHostPw, name: myName() }, (ack) => {
+      if (ack && ack.ok) { /* re-adopted — media never stopped */ }
+      // if it failed, the stream truly ended → the stream_ended event already handled cleanup
+    });
+  } else if (role === 'viewer' && myCode) {
+    socket.emit('stream_join', { code: myCode, pw: lastJoinPw, name: myName() }, (ack) => {
+      if (ack && ack.ok) { hostId = ack.hostId; /* keep watching */ }
+      else { cleanupViewer(); showGate(); toast('Stream ended', 'err'); }
+    });
+  } else {
+    socket.emit('stream_list', (d) => d && renderLive(d.streams));
+  }
+});

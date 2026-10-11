@@ -218,12 +218,9 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: MAX_FILE_BYTES },
-  fileFilter: (req, file, cb) => {
-    // reject obviously dangerous server-side executables
-    const bad = /\.(html?|js|svg|exe|bat|cmd|ps1|sh)$/i;
-    if (bad.test(file.originalname)) return cb(null, false);
-    cb(null, true);
-  },
+  // accept EVERY file type — the site is a file-sharing platform.
+  // Dangerous types (.html/.js/.svg/…) are served as forced downloads, never executed inline.
+  fileFilter: (req, file, cb) => cb(null, true),
 });
 
 const EXT_BY_MIME = {
@@ -398,9 +395,21 @@ app.get('/uploads/:filename', async (req, res) => {
     if (fs.existsSync(p)) log('backup_restore', fn, req);
   }
   if (!fs.existsSync(p)) return res.status(404).send('Not found');
+
+  /* All types are accepted, but types that could run scripts in the browser
+     (.html/.js/.svg/…) are ALWAYS served as forced downloads + octet-stream,
+     so they can never execute on the site's own origin.                    */
+  const risky = /\.(html?|js|mjs|svg|xhtml|xml|hta)$/i.test(fn);
+  const it = items.find(i => i.fileName === fn);
+  const name = it ? it.originalName : fn;
+
+  if (risky) {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`);
+    return res.sendFile(p);
+  }
   if (req.query.download === '1') {
-    const it = items.find(i => i.fileName === fn);
-    const name = it ? it.originalName : fn;
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`);
     if (it) { it.downloads = (it.downloads || 0) + 1; saveItems(); log('download', name, req); }
   } else {
@@ -792,11 +801,8 @@ const chatStorage = multer.diskStorage({
 const chatUpload = multer({
   storage: chatStorage,
   limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB per chat file
-  fileFilter: (req, file, cb) => {
-    const bad = /\.(html?|js|svg|exe|bat|cmd|ps1|sh)$/i;
-    if (bad.test(file.originalname)) return cb(null, false);
-    cb(null, true);
-  },
+  // accept ALL file types (the + button sends anything)
+  fileFilter: (req, file, cb) => cb(null, true),
 });
 
 app.post('/api/chat/upload', chatUpload.single('file'), (req, res) => {
@@ -987,6 +993,7 @@ function maybeKaliReply(room, userName, text, reqLike) {
    Host shares screen; viewers watch. Optional per-stream password.
    stream-admin can watch ANY stream secretly and force-stop any stream.     */
 const liveStreams = {}; // code → { hostId, hostName, pw(hash|null), viewers: Map<sid,{name}>, startedAt }
+const pendingHostEnd = new Map(); // code → timer (15s grace: a blip must not kill the stream)
 
 const streamCode = v => String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
 const hashPw = pw => pw ? crypto.createHash('sha256').update(pw).digest('hex') : null;
@@ -999,6 +1006,8 @@ function streamListPublic() {
 function endStream(c, reason) {
   const s = liveStreams[c];
   if (!s) return;
+  const pend = pendingHostEnd.get(c);
+  if (pend) { clearTimeout(pend); pendingHostEnd.delete(c); }
   delete liveStreams[c];
   io.to('stream:' + c).emit('stream_ended', { code: c, reason });
   io.socketsLeave('stream:' + c);
@@ -1019,6 +1028,24 @@ io.on('connection', (socket) => {
     try {
       const c = streamCode(data?.code);
       if (!c) return ack && ack({ error: 'invalid code' });
+      /* RECONNECT-ADOPT: if this code is live but its host just dropped
+         (grace timer pending), the returning host takes the stream back —
+         viewers keep watching, the stream is never killed by a blip. */
+      if (liveStreams[c] && pendingHostEnd.has(c)) {
+        clearTimeout(pendingHostEnd.get(c));
+        pendingHostEnd.delete(c);
+        const s = liveStreams[c];
+        s.hostId = socket.id; // adopt the new socket
+        streamRole = 'host';
+        streamJoined = c;
+        socket.data.streamCode = c;
+        socket.data.streamName = s.hostName;
+        socket.join('stream:' + c);
+        io.to('stream:' + c).emit('stream_host', { code: c, hostId: socket.id });
+        if (ack) ack({ ok: true, code: c, reAdopted: true });
+        log('stream_start', `code=${c} host RECONNECTED (adopted)`, reqLikeS());
+        return;
+      }
       if (liveStreams[c]) return ack && ack({ error: 'code already live' });
       liveStreams[c] = {
         code: c, hostId: socket.id, hostName: String(data?.name || 'anonymous').slice(0, 30),
@@ -1130,7 +1157,17 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     try {
       if (streamRole === 'host' && streamJoined && liveStreams[streamJoined]?.hostId === socket.id) {
-        endStream(streamJoined, 'host left');
+        /* GRACE: WebRTC media keeps flowing on its own even if the signaling
+           socket blips. Wait 15s — if the host reconnects, they re-adopt the
+           stream; only a REAL departure ends it. */
+        const c = streamJoined;
+        const prev = pendingHostEnd.get(c);
+        if (prev) clearTimeout(prev);
+        const t = setTimeout(() => {
+          pendingHostEnd.delete(c);
+          if (liveStreams[c] && liveStreams[c].hostId === socket.id) endStream(c, 'host left');
+        }, 15000);
+        pendingHostEnd.set(c, t);
       } else if (streamRole === 'viewer' && streamJoined) {
         const s = liveStreams[streamJoined];
         if (s) {
@@ -1201,13 +1238,15 @@ io.on('connection', (socket) => {
     if (!room) return;
     const t = String(data?.text || '').slice(0, 4000);
     const img = String(data?.image || '').slice(0, 2000);
-    if (!t.trim() && !img) return;
+    const aud = String(data?.audio || '').slice(0, 2000);
+    const cf = String(data?.cfile || '').slice(0, 2000);
+    // a message must carry SOMETHING: text, image, voice note, or a file
+    if (!t.trim() && !img && !aud && !cf) return;
     const msg = { ts: Date.now(), name, text: t, id: newId(), uid: socket.data.uid };
     if (img) msg.image = img;
-    const aud = String(data?.audio || '').slice(0, 2000);
     if (aud) { msg.audio = aud; msg.fname = String(data?.fname || 'voice').slice(0, 120); msg.fsize = Number(data?.fsize) || 0; }
-    const cf = String(data?.cfile || '').slice(0, 2000);
-    if (cf) { msg.cfile = cf; msg.fname = String(data?.fname || 'file').slice(0, 120); msg.fsize = Number(data?.fsize) || 0; }
+    const cfile = cf;
+    if (cfile) { msg.cfile = cfile; msg.fname = String(data?.fname || 'file').slice(0, 120); msg.fsize = Number(data?.fsize) || 0; }
     if (isPrivateAdmin) msg.admin = true;
     if (data?.replyTo && typeof data.replyTo === 'string') {
       const orig = (chats[room] || []).find(m => m.id === data.replyTo && !m.deleted);

@@ -332,7 +332,8 @@ $('#msgInput').addEventListener('paste', e => {
   if (files.length) { e.preventDefault(); sendImage(files[0]); }
 });
 
-/* ---------------------- attachments: image / file / voice ---------------------- */
+/* ---------------------- attachments: any file + voice ----------------------
+   The ＋ button accepts EVERY file type; 🎙️ records a voice note. */
 $('#btnImage').addEventListener('click', () => $('#imageInput').click());
 $('#imageInput').addEventListener('change', () => {
   const f = $('#imageInput').files[0];
@@ -427,18 +428,20 @@ function bubbleHTML(m, mine) {
   return `${media}${quote}${txt}${actionsHTML(m, mine)}`;
 }
 
-/* message grouping: same sender within 5 minutes → name shown only once */
-let lastRendered = null; // {uid, ts, kind}
+/* message grouping: same sender within the SAME MINUTE → stacked as one block
+   with ONE name and ONE time (exactly as requested) */
+let lastRendered = null; // {uid, name, ts, sys}
 function appendMsg(m, mine, opts = {}) {
   const el = document.createElement('div');
   const grouped = !opts.prepend && lastRendered && !lastRendered.sys &&
-    lastRendered.uid === m.uid && lastRendered.name === m.name && (m.ts - lastRendered.ts) < 5 * 60e3;
+    lastRendered.uid === m.uid && lastRendered.name === m.name &&
+    fmtTime(lastRendered.ts) === fmtTime(m.ts); // same displayed minute
   el.className = 'msg' + (mine ? ' mine' : '') + (m.admin ? ' admin-msg' : '') + (m.bot ? ' bot-msg' : '') + (grouped ? ' msg-grouped' : '');
   el.dataset.mid = m.id;
   const who = m.bot ? 'Kali' : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}${mine ? ' (you)' : ''}`;
   el.innerHTML = `${grouped ? '' : `<div class="who">${who}</div>`}
     <div class="bubble">${bubbleHTML(m, mine)}</div>
-    <div class="time">${esc(fmtTime(m.ts))}</div>`;
+    ${grouped ? '' : `<div class="time">${esc(fmtTime(m.ts))}</div>`}`;
   if (opts.prepend) $('#messages').prepend(el);
   else {
     $('#messages').appendChild(el);
