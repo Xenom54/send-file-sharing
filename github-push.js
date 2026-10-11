@@ -7,13 +7,11 @@ const isIgnored = p => IGNORE.some(i => p === i || p.startsWith(i + '/') || p.st
 function collect(dir, base = '') { const out = []; for (const name of fs.readdirSync(dir)) { const full = path.join(dir, name); const rel = base ? `${base}/${name}` : name; if (isIgnored(rel)) continue; const st = fs.statSync(full); if (st.isDirectory()) out.push(...collect(full, rel)); else out.push({ path: rel.replace(/\\/g, '/'), full }); } return out; }
 (async () => {
   const files = collect(ROOT);
-  console.log('uploading', files.length, 'files');
   const tree = [];
   for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const MSG = 'Shift+Enter multiline: chat + stream-chat boxes are now auto-growing textareas (Enter sends, Shift+Enter breaks a line); line breaks render correctly in bubbles; scope limited to chats, stream chat and the main composer as requested';
-  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
+  const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: 'cache fix: stream.html was stuck at v=17 across several releases (visitors could load stale stream.js). ALL pages now unified at v=22 in a single sweep — added a bump-all script pattern so no page is ever left behind again', tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);
   process.exit(0);
