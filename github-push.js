@@ -9,10 +9,10 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   const files = collect(ROOT);
   console.log('uploading', files.length, 'files');
   const tree = [];
-  for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); console.log('  done', f.path); }
+  for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const MSG = 'Linux/macOS stream-audio fix: browsers there cannot capture full-screen system audio - the site now detects the silent share, shows a one-click fallback panel (talk with mic / restart sharing a browser tab), and the host mic stays ON with zero viewers (auto-connects as they join)';
+  const MSG = 'direct-entry chat links: /private#public and /private#kali open the chat instantly (no gate); the URL always reflects the room; private room links auto-join too; Kali share link is personal (#kali opens each user their own Kali room)';
   const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);

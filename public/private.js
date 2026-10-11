@@ -208,8 +208,33 @@ function startChat(code) {
   $('#chatWrap').classList.remove('hidden');
   $('#messages').innerHTML = '';
   if (!socket.connected) socket.connect();
+  // the URL always reflects the room: #public / #kali / #roomcode → shareable direct links
+  const h = code === 'public' ? '#public' : code.startsWith('ai-') ? '#kali' : '#' + code;
+  if (location.hash !== h) history.replaceState(null, '', '/private' + h);
   joinRoom(code);
 }
+
+/* direct-entry links: /private#public, /private#kali, /private#roomcode */
+function hashTarget() {
+  if (location.hash.length < 2) return null;
+  return decodeURIComponent(location.hash.slice(1)).trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+}
+function roomFromHash() {
+  const code = hashTarget();
+  if (!code) return null;
+  if (code === 'kali') return 'ai-' + store.uid; // everyone gets THEIR OWN Kali room
+  return code; // 'public' or a private room code
+}
+function enterFromHash() {
+  const target = roomFromHash();
+  if (!target) return false;
+  ensureName().then(() => { if (currentRoom !== target) startChat(target); });
+  return true;
+}
+window.addEventListener('hashchange', () => {
+  const target = roomFromHash();
+  if (target && currentRoom !== target) ensureName().then(() => startChat(target));
+});
 
 function joinRoom(code, opts = {}) {
   const silent = !!opts.silent; // silent = reconnect: keep everything the user is doing
@@ -598,8 +623,10 @@ $('#btnDeleteRoom').addEventListener('click', async () => {
 });
 
 $('#btnShare').addEventListener('click', async () => {
-  const url = location.origin + '/private#' + currentRoom;
-  try { await navigator.clipboard.writeText(url); toast('✓ Room link copied'); }
+  // Kali gets the personal #kali link (each friend opens THEIR OWN Kali room)
+  const h = currentRoom === 'public' ? '#public' : currentRoom.startsWith('ai-') ? '#kali' : '#' + currentRoom;
+  const url = location.origin + '/private' + h;
+  try { await navigator.clipboard.writeText(url); toast('✓ Chat link copied'); }
   catch { $('#roomTitle').textContent = url; toast('⚠ Copy failed — link is in the room title', 'err'); }
 });
 
@@ -684,11 +711,9 @@ socket.on('public_activity', () => {
   }
 });
 
-/* auto-join via #code in the link */
-if (location.hash.length > 1) {
-  const code = decodeURIComponent(location.hash.slice(1)).trim().toLowerCase();
-  if (code) $('#gateRoom').value = code;
-}
+/* auto-join via #code in the link: #public, #kali or a private room code
+   (entering the chat directly — no gate step) */
+enterFromHash();
 renderMyRooms();
 renderUnread();
 ensureName();
