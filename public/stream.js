@@ -240,12 +240,13 @@ socket.on('stream_signal', async ({ from, data }) => {
 });
 
 /* ============================ VOICE (mic) ============================
-   BOTH directions, each on dedicated audio-only PCs (marked voice:true):
-   - viewer 🎙️ → offer to the host → host answers + plays the audio
-   - host 🎙️ → one PC per viewer → offer to every viewer → they play it
-   The stream's video PC is never touched → no renegotiation problems.   */
-const voicePcs = new Map();      // host side: viewerId → {pc, audio} (viewer→host)
-const hostVoicePcs = new Map();  // host side: viewerId → pc (host→viewer)
+   BOTH directions, each on dedicated audio-only PCs. Signals are tagged
+   with a channel so they can never cross wires:
+     ch='v2h' → viewer's mic  → host   (host hears the viewer)
+     ch='h2v' → host's mic    → viewer (viewers hear the host)
+   The stream's video PC is never touched → no renegotiation problems.  */
+const voicePcs = new Map();      // host side: viewerId → {pc, audio} on ch v2h
+const hostVoicePcs = new Map();  // host side: viewerId → pc on ch h2v
 let hostMicStream = null, hostMicOn = false;
 let viewerHostAudio = null;      // viewer side: audio element for the host's voice
 
@@ -255,8 +256,10 @@ function playAudioEl(audio) {
 
 async function handleVoiceSignal(from, data) {
   try {
+    const ch = data.ch; // 'v2h' | 'h2v'
     if (role === 'host') {
-      if (data.sdp && data.sdp.type === 'offer') {
+      if (data.sdp && data.sdp.type === 'offer' && (ch === 'v2h' || !ch)) {
+        // a viewer turned on their mic → answer + play their voice
         let entry = voicePcs.get(from);
         if (!entry) {
           const pc = new RTCPeerConnection(STUN);
@@ -266,7 +269,7 @@ async function handleVoiceSignal(from, data) {
           document.body.appendChild(audio);
           pc.addEventListener('track', e => { audio.srcObject = e.streams[0]; playAudioEl(audio); });
           pc.addEventListener('icecandidate', e => {
-            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, candidate: e.candidate } });
+            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'v2h', candidate: e.candidate } });
           });
           entry = { pc, audio };
           voicePcs.set(from, entry);
@@ -275,13 +278,22 @@ async function handleVoiceSignal(from, data) {
         await entry.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
         const answer = await entry.pc.createAnswer();
         await entry.pc.setLocalDescription(answer);
-        socket.emit('stream_signal', { to: from, data: { voice: true, sdp: entry.pc.localDescription } });
+        socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'v2h', sdp: entry.pc.localDescription } });
+      } else if (data.sdp && data.sdp.type === 'answer' && ch === 'h2v') {
+        // a viewer accepted OUR voice offer → complete the host→viewer channel
+        const pc = hostVoicePcs.get(from);
+        if (pc) { try { await pc.setRemoteDescription(new RTCSessionDescription(data.sdp)); } catch {} }
       } else if (data.candidate) {
-        const entry = voicePcs.get(from);
-        if (entry) { try { await entry.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+        if (ch === 'h2v') {
+          const pc = hostVoicePcs.get(from);
+          if (pc) { try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+        } else {
+          const entry = voicePcs.get(from);
+          if (entry) { try { await entry.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+        }
       }
     } else if (role === 'viewer') {
-      if (data.sdp && data.sdp.type === 'offer') {
+      if (data.sdp && data.sdp.type === 'offer' && ch === 'h2v') {
         // the HOST is talking: answer and play their voice
         if (!viewerHostAudio) {
           viewerHostAudio = document.createElement('audio');
@@ -294,18 +306,18 @@ async function handleVoiceSignal(from, data) {
           viewerHostAudio.pc = pc;
           pc.addEventListener('track', e => { viewerHostAudio.srcObject = e.streams[0]; playAudioEl(viewerHostAudio); });
           pc.addEventListener('icecandidate', e => {
-            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, candidate: e.candidate } });
+            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'h2v', candidate: e.candidate } });
           });
         }
         await viewerHostAudio.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
         const answer = await viewerHostAudio.pc.createAnswer();
         await viewerHostAudio.pc.setLocalDescription(answer);
-        socket.emit('stream_signal', { to: from, data: { voice: true, sdp: viewerHostAudio.pc.localDescription } });
-      } else if (data.sdp && data.sdp.type === 'answer') {
+        socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'h2v', sdp: viewerHostAudio.pc.localDescription } });
+      } else if (data.sdp && data.sdp.type === 'answer' && (ch === 'v2h' || !ch)) {
         if (micPc) { try { await micPc.setRemoteDescription(new RTCSessionDescription(data.sdp)); } catch {} }
       } else if (data.candidate) {
-        if (viewerHostAudio?.pc) { try { await viewerHostAudio.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
-        if (micPc) { try { await micPc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+        if (ch === 'v2h' || !ch) { if (micPc) { try { await micPc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} } }
+        if (ch === 'h2v') { if (viewerHostAudio?.pc) { try { await viewerHostAudio.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} } }
       }
     }
   } catch (e) { console.error('[voice]', e.message); }
@@ -321,11 +333,11 @@ $('#btnMic').addEventListener('click', async () => {
     micPc = new RTCPeerConnection(STUN);
     micStream.getTracks().forEach(t => micPc.addTrack(t, micStream));
     micPc.addEventListener('icecandidate', e => {
-      if (e.candidate) socket.emit('stream_signal', { to: hostId, data: { voice: true, candidate: e.candidate } });
+      if (e.candidate) socket.emit('stream_signal', { to: hostId, data: { voice: true, ch: 'v2h', candidate: e.candidate } });
     });
     const offer = await micPc.createOffer();
     await micPc.setLocalDescription(offer);
-    socket.emit('stream_signal', { to: hostId, data: { voice: true, sdp: micPc.localDescription } });
+    socket.emit('stream_signal', { to: hostId, data: { voice: true, ch: 'v2h', sdp: micPc.localDescription } });
     micOn = true;
     $('#btnMic').classList.add('mic-on');
     $('#btnMic').title = 'Mic ON — click to stop';
@@ -346,11 +358,11 @@ async function makeHostVoicePc(viewerId) {
   hostVoicePcs.set(viewerId, pc);
   hostMicStream.getTracks().forEach(t => pc.addTrack(t, hostMicStream));
   pc.addEventListener('icecandidate', e => {
-    if (e.candidate) socket.emit('stream_signal', { to: viewerId, data: { voice: true, candidate: e.candidate } });
+    if (e.candidate) socket.emit('stream_signal', { to: viewerId, data: { voice: true, ch: 'h2v', candidate: e.candidate } });
   });
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  socket.emit('stream_signal', { to: viewerId, data: { voice: true, sdp: pc.localDescription } });
+  socket.emit('stream_signal', { to: viewerId, data: { voice: true, ch: 'h2v', sdp: pc.localDescription } });
   return pc;
 }
 $('#btnHostMic').addEventListener('click', async () => {
@@ -449,6 +461,27 @@ $('#scImg').addEventListener('click', () => $('#scFile').click());
 $('#scFile').addEventListener('change', () => scUpload('#scFile'));
 $('#scImgV').addEventListener('click', () => $('#scFileV').click());
 $('#scFileV').addEventListener('change', () => scUpload('#scFileV'));
+
+/* paste an image straight into the stream chat (Ctrl+V) */
+async function scUploadRaw(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  if (file.size > 25 * 1024 * 1024) return toast('⚠ Too large (max 25 MB)', 'err');
+  const fd = new FormData();
+  fd.append('file', file);
+  toast('📎 Uploading image…');
+  try {
+    const r = await fetch('/api/chat/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) return toast('⚠ Upload failed: ' + (d.error || ''), 'err');
+    socket.emit('stream_chat', { image: d.url });
+  } catch { toast('⚠ Upload failed', 'err'); }
+}
+['#scInput', '#scInputV'].forEach(sel => {
+  $(sel).addEventListener('paste', e => {
+    const img = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));
+    if (img) { e.preventDefault(); scUploadRaw(img); }
+  });
+});
 
 /* host preview toggle (hidden by default — fixes the infinite mirror loop) */
 let previewShown = false;
