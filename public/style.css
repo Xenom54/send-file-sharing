@@ -742,8 +742,16 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .sys span { background: var(--surface-2); padding: 3px 12px; border-radius: 99px; border: 1px solid var(--border); }
 .typing-ind { font-size: .76rem; color: var(--text-3); min-height: 18px; padding: 0 6px; font-style: italic; }
 
-.chat-input { padding: 13px 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; background: rgba(255, 255, 255, .02); }
+.chat-input { padding: 13px 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; background: rgba(255, 255, 255, .02); align-items: flex-end; }
 .chat-input input { flex: 1; }
+/* multiline chat box: Enter sends, Shift+Enter breaks a line; grows up to ~5 rows */
+#msgInput {
+  flex: 1; resize: none; overflow-y: auto;
+  min-height: 42px; max-height: 118px;
+  line-height: 1.45; padding: 10px 14px;
+  font-family: inherit; font-size: .93rem;
+}
+#msgInput:focus { outline: none; }
 
 .gate { max-width: 480px; margin: 66px auto; padding: 32px; }
 .gate h2 { font-size: 1.4rem; font-weight: 800; letter-spacing: -.02em; }
@@ -767,8 +775,14 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 }
 .sc-who { font-size: .66rem; color: #93a4ff; font-weight: 700; margin-bottom: 2px; word-break: break-all; }
 .sc-img { max-width: 100%; max-height: 200px; border-radius: 7px; display: block; margin: 4px 0; }
-.sc-input { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+.sc-input { display: flex; gap: 6px; margin-top: 10px; align-items: flex-end; }
 .sc-input input { flex: 1; min-width: 0; padding: 8px 10px; font-size: .84rem; }
+/* multiline stream-chat boxes (Shift+Enter = new line) */
+#scInput, #scInputV {
+  flex: 1; min-width: 0; resize: none; overflow-y: auto;
+  min-height: 36px; max-height: 76px;
+  padding: 8px 10px; font-size: .84rem; line-height: 1.4;
+}
 .sc-input .btn.icon { padding: 6px 8px; font-size: .9rem; }
 #btnMic.mic-on { background: rgba(52, 211, 153, .16); border-color: rgba(52, 211, 153, .55); animation: recpulse 1.2s infinite; }
 #btnHostMic.mic-on { background: rgba(52, 211, 153, .16); border-color: rgba(52, 211, 153, .55); animation: recpulse 1.2s infinite; }

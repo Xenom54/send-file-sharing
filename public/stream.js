@@ -419,11 +419,22 @@ function scSend(hostSel, inputSel) {
   if (!text || !role) return;
   socket.emit('stream_chat', { text });
   input.value = '';
+  scGrow(input); // reset the box height after sending
 }
 $('#scSend').addEventListener('click', () => scSend(null, '#scInput'));
-$('#scInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#scSend').click(); });
 $('#scSendV').addEventListener('click', () => scSend(null, '#scInputV'));
-$('#scInputV').addEventListener('keydown', e => { if (e.key === 'Enter') $('#scSendV').click(); });
+/* Enter = send · Shift+Enter = new line (multiline boxes grow up to ~4 rows) */
+function scGrow(el, max = 76) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, max) + 'px';
+}
+['#scInput', '#scInputV'].forEach(sel => {
+  $(sel).addEventListener('input', () => scGrow($(sel)));
+  $(sel).addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $(sel === '#scInput' ? '#scSend' : '#scSendV').click(); }
+  });
+});
 
 async function scUpload(fileInputSel) {
   const f = $(fileInputSel).files[0];

@@ -70,6 +70,8 @@ function restoreDraft(code) {
   try {
     $('#msgInput').value = localStorage.getItem('send_draft_' + code) || '';
   } catch { $('#msgInput').value = ''; }
+  // resize the box to fit a restored multiline draft
+  if (typeof autoGrowInput === 'function') autoGrowInput($('#msgInput'));
 }
 (function () {
   let t = null;
@@ -253,7 +255,7 @@ function joinRoom(code, opts = {}) {
     $('#typingInd').textContent = '';
     cancelReply();
   }
-  $('#msgInput').placeholder = isKali ? 'Talk to Kali… (or summon it anywhere with @kali)' : 'Type a message… (@kali to summon Kali)';
+  $('#msgInput').placeholder = isKali ? 'Talk to Kali… (Shift+Enter = new line)' : 'Type a message… (@kali to summon · Shift+Enter = new line)';
   $('#membersPanel').classList.toggle('hidden', !iAmAdmin);
   const pw = sessionStorage.getItem('send_privateadmin_pw') || '';
   socket.emit('join', { room: code, name, uid: store.uid, pw }, (ack) => {
@@ -333,18 +335,27 @@ function send() {
   if (replyTarget) payload.replyTo = replyTarget.id;
   socket.emit('msg', payload);
   $('#msgInput').value = '';
+  autoGrowInput($('#msgInput')); // reset the box height after sending
   saveDraft(); // sent → clear the saved draft too
   cancelReply();
   socket.emit('typing', false);
 }
 $('#btnSend').addEventListener('click', send);
+// Enter = send · Shift+Enter = new line (textarea supports it natively)
 $('#msgInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('#msgInput').addEventListener('input', () => {
+  autoGrowInput($('#msgInput'));
   const now = Date.now();
   if (now - lastTyping > 1200) { lastTyping = now; socket.emit('typing', true); }
   clearTimeout(typingTimeout);
   typingTimeout = setTimeout(() => socket.emit('typing', false), 1500);
 });
+/* auto-growing textarea: 1 row → up to ~5 rows */
+function autoGrowInput(el, max = 118) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, max) + 'px';
+}
 
 /* ---------------------- attachments: any file + voice ----------------------
    The ＋ button accepts EVERY file type; 🎙️ records a voice note. */
