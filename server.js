@@ -1079,11 +1079,14 @@ io.on('connection', (socket) => {
       streamJoined = c;
       socket.data.streamCode = c;
       socket.data.streamName = s.viewers.get(socket.id).name;
-      io.to(s.hostId).emit('stream_viewer', { id: socket.id, name: s.viewers.get(socket.id).name, count: s.viewers.size });
+      // announce the join to the WHOLE room (host + viewers) so voice-mesh peers can learn each other
+      io.to('stream:' + c).emit('stream_viewer', { id: socket.id, name: s.viewers.get(socket.id).name, count: s.viewers.size });
       socket.emit('stream_chat_history', s.chat || []);
       io.emit('stream_update', { streams: streamListPublic() });
       log('stream_join', `code=${c} name=${data?.name}`, reqLikeS());
-      if (ack) ack({ ok: true, code: c, host: s.hostName, hostId: s.hostId });
+      // peers = the host + every OTHER viewer (so a viewer can talk to everyone directly)
+      const others = [...s.viewers.keys()].filter(id => id !== socket.id);
+      if (ack) ack({ ok: true, code: c, host: s.hostName, hostId: s.hostId, peers: others });
     } catch (e) { console.error('[stream join]', e.message); ack && ack({ error: 'failed' }); }
   });
 
@@ -1172,7 +1175,8 @@ io.on('connection', (socket) => {
         const s = liveStreams[streamJoined];
         if (s) {
           s.viewers.delete(socket.id);
-          io.to(s.hostId).emit('stream_viewer_left', { id: socket.id, count: s.viewers.size });
+          // announce to the WHOLE room so voice-mesh peers drop this peer's audio
+          io.to('stream:' + streamJoined).emit('stream_viewer_left', { id: socket.id, count: s.viewers.size });
           io.emit('stream_update', { streams: streamListPublic() });
         }
       }

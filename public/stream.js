@@ -71,7 +71,13 @@ $('#hostGo').addEventListener('click', async () => {
   const btn = $('#hostGo');
   btn.disabled = true; btn.textContent = 'Starting…';
   try {
-    localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    // quality: full-frame-rate capture, ideal for screen content
+    localStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 30, max: 60 } },
+      audio: true,
+    });
+    // tell WebRTC this is screen content → encoder prioritizes sharpness
+    localStream.getVideoTracks()[0].contentHint = 'detail';
   } catch (e) {
     $('#hostErr').textContent = 'Screen permission denied';
     btn.disabled = false; btn.textContent = 'Start streaming';
@@ -104,13 +110,12 @@ async function stopHosting() {
 function cleanupHost() {
   viewerPcs.forEach(pc => pc.close());
   viewerPcs.clear();
-  voicePcs.forEach(({ pc, audio }) => { pc.close(); audio.remove(); });
-  voicePcs.clear();
-  hostVoicePcs.forEach(pc => pc.close());
-  hostVoicePcs.clear();
-  hostMicStream?.getTracks().forEach(t => t.stop());
-  hostMicStream = null; hostMicOn = false;
-  $('#btnHostMic').classList.remove('mic-on');
+  stopMic();                       // mesh voice: mic + all in/out voice PCs
+  outVoice.forEach(pc => { try { pc.close(); } catch {} });
+  outVoice.clear();
+  inVoice.forEach(({ pc, audio }) => { try { pc.close(); } catch {}; try { audio.remove(); } catch {} });
+  inVoice.clear();
+  peers.clear();
   localStream?.getTracks().forEach(t => t.stop());
   localStream = null;
   $('#scMessages').innerHTML = '';
@@ -137,6 +142,18 @@ async function makeHostPc(viewerId) {
   const pc = new RTCPeerConnection(STUN);
   viewerPcs.set(viewerId, pc);
   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  // quality: high bitrate for sharp screen content, never downscale the capture
+  try {
+    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+    if (sender) {
+      const params = sender.getParameters();
+      if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+      params.encodings[0].maxBitrate = 8 * 1024 * 1024;   // 8 Mbps — crisp text & detail
+      params.encodings[0].scaleResolutionDownBy = 1;      // keep full resolution
+      params.degradationPreference = 'maintain-resolution'; // prefer sharpness over fps
+      await sender.setParameters(params);
+    }
+  } catch { /* older browsers: defaults still work */ }
   pc.addEventListener('icecandidate', e => {
     if (e.candidate) socket.emit('stream_signal', { to: viewerId, data: { candidate: e.candidate } });
   });
@@ -175,6 +192,10 @@ $('#watchGo').addEventListener('click', () => {
     myCode = ack.code;
     hostId = ack.hostId;
     lastJoinPw = $('#watchPw').value;
+    // learn everyone already here: the host + every other viewer (voice mesh)
+    peers.clear();
+    (ack.peers || []).forEach(addPeer);
+    addPeer(ack.hostId);
     $('#watchModal').classList.remove('open');
     $('#gate').classList.add('hidden');
     $('#watchView').classList.remove('hidden');
@@ -185,15 +206,15 @@ $('#watchPw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#watc
 
 $('#btnLeaveStream').addEventListener('click', () => { cleanupViewer(); showGate(); });
 function cleanupViewer() {
-  stopMic();
+  stopMic();                       // mesh voice: mic + all out voice PCs
+  outVoice.forEach(pc => { try { pc.close(); } catch {} });
+  outVoice.clear();
+  inVoice.forEach(({ pc, audio }) => { try { pc.close(); } catch {}; try { audio.remove(); } catch {} });
+  inVoice.clear();
+  peers.clear();
   viewerPc?.close();
   viewerPc = null;
   $('#viewerVideo').srcObject = null;
-  if (viewerHostAudio) {
-    viewerHostAudio.pc?.close();
-    viewerHostAudio.remove();
-    viewerHostAudio = null;
-  }
   $('#scMessagesViewer').innerHTML = '';
   role = null; myCode = null; hostId = null;
 }
@@ -239,165 +260,120 @@ socket.on('stream_signal', async ({ from, data }) => {
   } catch (e) { console.error('[webrtc]', e.message); }
 });
 
-/* ============================ VOICE (mic) ============================
-   BOTH directions, each on dedicated audio-only PCs. Signals are tagged
-   with a channel so they can never cross wires:
-     ch='v2h' → viewer's mic  → host   (host hears the viewer)
-     ch='h2v' → host's mic    → viewer (viewers hear the host)
-   The stream's video PC is never touched → no renegotiation problems.  */
-const voicePcs = new Map();      // host side: viewerId → {pc, audio} on ch v2h
-const hostVoicePcs = new Map();  // host side: viewerId → pc on ch h2v
-let hostMicStream = null, hostMicOn = false;
-let viewerHostAudio = null;      // viewer side: audio element for the host's voice
+/* ============================ VOICE (mic) — FULL MESH ============================
+   EVERYONE HEARS EVERYONE. Each voice-enabled participant sends their mic
+   to every other participant (host AND viewers) on a dedicated audio PC.
+   Signals carry pcDir ('out' = the emitter created this PC; the receiver
+   maps it to the opposite side), so offers/answers/candidates can never
+   cross wires. The stream's video PC is never touched.                       */
+let myMicStream = null, micOn = false;
+const peers = new Set();     // socket ids of everyone else in this stream
+const outVoice = new Map(); // toId   → pc          (my mic → that peer)
+const inVoice = new Map();  // fromId → {pc, audio}  (that peer's mic → me)
 
-function playAudioEl(audio) {
-  audio.play?.().catch(() => { /* autoplay guard: retried on the next track event */ });
+function playAudioEl(audio) { audio.play?.().catch(() => {}); }
+
+function addPeer(id) {
+  if (!id || id === socket.id || peers.has(id)) return;
+  peers.add(id);
+  // if my mic is already on, this newcomer hears me immediately
+  if (micOn && myMicStream) makeOutVoice(id).catch(() => {});
 }
-
-async function handleVoiceSignal(from, data) {
-  try {
-    const ch = data.ch; // 'v2h' | 'h2v'
-    if (role === 'host') {
-      if (data.sdp && data.sdp.type === 'offer' && (ch === 'v2h' || !ch)) {
-        // a viewer turned on their mic → answer + play their voice
-        let entry = voicePcs.get(from);
-        if (!entry) {
-          const pc = new RTCPeerConnection(STUN);
-          const audio = document.createElement('audio');
-          audio.autoplay = true;
-          audio.style.display = 'none';
-          document.body.appendChild(audio);
-          pc.addEventListener('track', e => { audio.srcObject = e.streams[0]; playAudioEl(audio); });
-          pc.addEventListener('icecandidate', e => {
-            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'v2h', candidate: e.candidate } });
-          });
-          entry = { pc, audio };
-          voicePcs.set(from, entry);
-          toast('🎙️ A viewer started talking');
-        }
-        await entry.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        const answer = await entry.pc.createAnswer();
-        await entry.pc.setLocalDescription(answer);
-        socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'v2h', sdp: entry.pc.localDescription } });
-      } else if (data.sdp && data.sdp.type === 'answer' && ch === 'h2v') {
-        // a viewer accepted OUR voice offer → complete the host→viewer channel
-        const pc = hostVoicePcs.get(from);
-        if (pc) { try { await pc.setRemoteDescription(new RTCSessionDescription(data.sdp)); } catch {} }
-      } else if (data.candidate) {
-        if (ch === 'h2v') {
-          const pc = hostVoicePcs.get(from);
-          if (pc) { try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
-        } else {
-          const entry = voicePcs.get(from);
-          if (entry) { try { await entry.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
-        }
-      }
-    } else if (role === 'viewer') {
-      if (data.sdp && data.sdp.type === 'offer' && ch === 'h2v') {
-        // the HOST is talking: answer and play their voice
-        if (!viewerHostAudio) {
-          viewerHostAudio = document.createElement('audio');
-          viewerHostAudio.autoplay = true;
-          viewerHostAudio.style.display = 'none';
-          document.body.appendChild(viewerHostAudio);
-        }
-        if (!viewerHostAudio.pc) {
-          const pc = new RTCPeerConnection(STUN);
-          viewerHostAudio.pc = pc;
-          pc.addEventListener('track', e => { viewerHostAudio.srcObject = e.streams[0]; playAudioEl(viewerHostAudio); });
-          pc.addEventListener('icecandidate', e => {
-            if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'h2v', candidate: e.candidate } });
-          });
-        }
-        await viewerHostAudio.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        const answer = await viewerHostAudio.pc.createAnswer();
-        await viewerHostAudio.pc.setLocalDescription(answer);
-        socket.emit('stream_signal', { to: from, data: { voice: true, ch: 'h2v', sdp: viewerHostAudio.pc.localDescription } });
-      } else if (data.sdp && data.sdp.type === 'answer' && (ch === 'v2h' || !ch)) {
-        if (micPc) { try { await micPc.setRemoteDescription(new RTCSessionDescription(data.sdp)); } catch {} }
-      } else if (data.candidate) {
-        if (ch === 'v2h' || !ch) { if (micPc) { try { await micPc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} } }
-        if (ch === 'h2v') { if (viewerHostAudio?.pc) { try { await viewerHostAudio.pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} } }
-      }
-    }
-  } catch (e) { console.error('[voice]', e.message); }
+function dropPeer(id) {
+  peers.delete(id);
+  const ov = outVoice.get(id);
+  if (ov) { try { ov.close(); } catch {} outVoice.delete(id); }
+  const iv = inVoice.get(id);
+  if (iv) { try { iv.pc.close(); iv.audio.remove(); } catch {} inVoice.delete(id); }
 }
-
-/* ---- viewer mic (talk to the streamer) ---- */
-let micPc = null, micStream = null, micOn = false;
-$('#btnMic').addEventListener('click', async () => {
-  if (role !== 'viewer') return;
-  if (micOn) return stopMic();
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    micPc = new RTCPeerConnection(STUN);
-    micStream.getTracks().forEach(t => micPc.addTrack(t, micStream));
-    micPc.addEventListener('icecandidate', e => {
-      if (e.candidate) socket.emit('stream_signal', { to: hostId, data: { voice: true, ch: 'v2h', candidate: e.candidate } });
-    });
-    const offer = await micPc.createOffer();
-    await micPc.setLocalDescription(offer);
-    socket.emit('stream_signal', { to: hostId, data: { voice: true, ch: 'v2h', sdp: micPc.localDescription } });
-    micOn = true;
-    $('#btnMic').classList.add('mic-on');
-    $('#btnMic').title = 'Mic ON — click to stop';
-  } catch { toast('⚠ Microphone access denied', 'err'); }
+socket.on('stream_viewer', ({ id }) => addPeer(id));       // anyone joins → learn them
+socket.on('stream_viewer_left', ({ id }) => dropPeer(id)); // anyone leaves → forget them
+socket.on('stream_host', ({ hostId: hid }) => {
+  if (role === 'viewer') {  // the host reconnected with a new socket id
+    if (hostId) dropPeer(hostId);
+    hostId = hid;
+    addPeer(hid);
+  }
 });
-function stopMic() {
-  micStream?.getTracks().forEach(t => t.stop());
-  micPc?.close();
-  micPc = null; micStream = null; micOn = false;
-  $('#btnMic').classList.remove('mic-on');
-  $('#btnMic').title = 'Talk to the streamer (mic)';
-}
 
-/* ---- HOST mic (talk to ALL viewers) ---- */
-async function makeHostVoicePc(viewerId) {
-  if (hostVoicePcs.has(viewerId)) return hostVoicePcs.get(viewerId);
+async function makeOutVoice(peerId) {
+  if (outVoice.has(peerId)) return outVoice.get(peerId);
   const pc = new RTCPeerConnection(STUN);
-  hostVoicePcs.set(viewerId, pc);
-  hostMicStream.getTracks().forEach(t => pc.addTrack(t, hostMicStream));
+  outVoice.set(peerId, pc);
+  myMicStream.getTracks().forEach(t => pc.addTrack(t, myMicStream));
   pc.addEventListener('icecandidate', e => {
-    if (e.candidate) socket.emit('stream_signal', { to: viewerId, data: { voice: true, ch: 'h2v', candidate: e.candidate } });
+    if (e.candidate) socket.emit('stream_signal', { to: peerId, data: { voice: true, pcDir: 'out', candidate: e.candidate } });
   });
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  socket.emit('stream_signal', { to: viewerId, data: { voice: true, ch: 'h2v', sdp: pc.localDescription } });
+  socket.emit('stream_signal', { to: peerId, data: { voice: true, pcDir: 'out', sdp: pc.localDescription } });
   return pc;
 }
-$('#btnHostMic').addEventListener('click', async () => {
-  if (role !== 'host') return;
-  if (hostMicOn) return stopHostMic();
-  if (!viewerPcs.size) return toast('⚠ No viewers yet — they can hear you once they join', 'err');
+
+async function startMic() {
   try {
-    hostMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    for (const vid of viewerPcs.keys()) await makeHostVoicePc(vid);
-    hostMicOn = true;
-    $('#btnHostMic').classList.add('mic-on');
-    $('#btnHostMic').title = 'Mic ON — click to stop';
-    toast('🎙️ You are talking to your viewers');
+    myMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!peers.size) {
+      myMicStream.getTracks().forEach(t => t.stop());
+      myMicStream = null;
+      return toast('⚠ No one else is here yet — turn the mic on when someone joins', 'err');
+    }
+    for (const id of peers) await makeOutVoice(id);
+    micOn = true;
+    (role === 'host' ? $('#btnHostMic') : $('#btnMic')).classList.add('mic-on');
+    toast('🎙️ Everyone can hear you now');
   } catch { toast('⚠ Microphone access denied', 'err'); }
-});
-function stopHostMic() {
-  hostMicStream?.getTracks().forEach(t => t.stop());
-  hostVoicePcs.forEach(pc => pc.close());
-  hostVoicePcs.clear();
-  hostMicStream = null; hostMicOn = false;
-  $('#btnHostMic').classList.remove('mic-on');
-  $('#btnHostMic').title = 'Talk to your viewers (mic)';
 }
-/* a new viewer joins while the host mic is on → spin a voice PC for them too */
-socket.on('stream_viewer', ({ id }) => {
-  if (role === 'host' && hostMicOn && hostMicStream) makeHostVoicePc(id).catch(() => {});
+function stopMic() {
+  myMicStream?.getTracks().forEach(t => t.stop());
+  myMicStream = null; micOn = false;
+  outVoice.forEach(pc => { try { pc.close(); } catch {} });
+  outVoice.clear();
+  $('#btnHostMic').classList.remove('mic-on');
+  $('#btnMic').classList.remove('mic-on');
+}
+$('#btnMic').addEventListener('click', () => {
+  if (role !== 'viewer') return;
+  micOn ? stopMic() : startMic();
 });
-/* viewer left → drop their voice PCs */
-socket.on('stream_viewer_left', ({ id }) => {
+$('#btnHostMic').addEventListener('click', () => {
   if (role !== 'host') return;
-  const v = voicePcs.get(id);
-  if (v) { v.pc.close(); v.audio.remove(); voicePcs.delete(id); }
-  const hv = hostVoicePcs.get(id);
-  if (hv) { hv.close(); hostVoicePcs.delete(id); }
+  micOn ? stopMic() : startMic();
 });
+
+async function handleVoiceSignal(from, data) {
+  try {
+    addPeer(from); // a voice offer means this peer exists — learn them
+    if (data.sdp && data.sdp.type === 'offer') {
+      let entry = inVoice.get(from);
+      if (!entry) {
+        const pc = new RTCPeerConnection(STUN);
+        const audio = document.createElement('audio');
+        audio.autoplay = true;
+        audio.style.display = 'none';
+        document.body.appendChild(audio);
+        pc.addEventListener('track', e => { audio.srcObject = e.streams[0]; playAudioEl(audio); });
+        pc.addEventListener('icecandidate', e => {
+          if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, pcDir: 'in', candidate: e.candidate } });
+        });
+        entry = { pc, audio };
+        inVoice.set(from, entry);
+        toast('🎙️ Someone started talking');
+      }
+      await entry.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      const answer = await entry.pc.createAnswer();
+      await entry.pc.setLocalDescription(answer);
+      socket.emit('stream_signal', { to: from, data: { voice: true, pcDir: 'in', sdp: entry.pc.localDescription } });
+    } else if (data.sdp && data.sdp.type === 'answer') {
+      const pc = outVoice.get(from);
+      if (pc) { try { await pc.setRemoteDescription(new RTCSessionDescription(data.sdp)); } catch {} }
+    } else if (data.candidate) {
+      // pcDir is from the EMITTER's perspective: their 'out' PC = my 'in' PC and vice versa
+      const target = data.pcDir === 'out' ? inVoice.get(from)?.pc : outVoice.get(from);
+      if (target) { try { await target.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {} }
+    }
+  } catch (e) { console.error('[voice]', e.message); }
+}
 
 /* fullscreen */
 $('#btnFullscreen').addEventListener('click', () => {
