@@ -346,17 +346,6 @@ $('#msgInput').addEventListener('input', () => {
   typingTimeout = setTimeout(() => socket.emit('typing', false), 1500);
 });
 
-$('#btnImage').addEventListener('click', () => $('#imageInput').click());
-$('#imageInput').addEventListener('change', () => {
-  const f = $('#imageInput').files[0];
-  if (f) sendImage(f);
-  $('#imageInput').value = '';
-});
-$('#msgInput').addEventListener('paste', e => {
-  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
-  if (files.length) { e.preventDefault(); sendImage(files[0]); }
-});
-
 /* ---------------------- attachments: any file + voice ----------------------
    The ＋ button accepts EVERY file type; 🎙️ records a voice note. */
 $('#btnImage').addEventListener('click', () => $('#imageInput').click());
@@ -449,7 +438,12 @@ function healName(s) {
 function bubbleHTML(m, mine) {
   let media = '';
   if (m.image) media = `<img src="${esc(m.image)}" alt="image" class="chat-img zoomable" data-full="${esc(m.image)}">`;
-  else if (m.audio) media = `<audio controls preload="metadata" src="${esc(m.audio)}" class="chat-audio"></audio>`;
+  else if (m.audio) media = `
+    <div class="voice-msg" data-src="${esc(m.audio)}">
+      <button class="vm-play" title="Play">▶</button>
+      <div class="vm-wave" title="Click to seek"><i></i></div>
+      <span class="vm-dur">0:00</span>
+    </div>`;
   else if (m.cfile) media = `<a class="chat-file" href="${esc(m.cfile)}?download=1" download>
       <span class="cf-ic">📄</span>
       <span><span class="cf-nm">${esc(healName(m.fname) || 'file')}</span><span class="cf-sz">${fmtChatSize(m.fsize)} · download</span></span>
@@ -481,6 +475,8 @@ function appendMsg(m, mine, opts = {}) {
     $('#messages').appendChild(el);
     $('#messages').scrollTop = $('#messages').scrollHeight;
   }
+  // voice notes: hydrate the duration immediately (before the first play)
+  if (m.audio && el.querySelector('.voice-msg')) vmAudio(el.querySelector('.voice-msg'));
   if (!m.deleted) lastRendered = { uid: m.uid, name: m.name, ts: m.ts, sys: false };
 }
 function appendSys(m) {
@@ -512,9 +508,76 @@ $('#messages').addEventListener('click', e => {
     socket.emit('delmsg', { id: del.dataset.del });
     return;
   }
+  const vmPlay = e.target.closest('.vm-play');
+  if (vmPlay) return toggleVoice(vmPlay.closest('.voice-msg'));
+  const vmWave = e.target.closest('.vm-wave');
+  if (vmWave) return seekVoice(vmWave.closest('.voice-msg'), e);
   const zoom = e.target.closest('.zoomable');
   if (zoom) openLightbox(zoom.dataset.full || zoom.src);
 });
+
+/* ---------------- custom voice-note player (dark, elegant) ----------------
+   One audio element per message bubble (WeakMap → dies with the DOM node),
+   only one voice plays at a time — like modern messengers.               */
+const vmPlayers = new WeakMap();
+function vmAudio(vmEl) {
+  let a = vmPlayers.get(vmEl);
+  if (!a) {
+    a = new Audio(vmEl.dataset.src);
+    a.preload = 'metadata';
+    vmPlayers.set(vmEl, a);
+    const dur = vmEl.querySelector('.vm-dur');
+    const fill = vmEl.querySelector('.vm-wave > i');
+    a.addEventListener('loadedmetadata', () => { dur.textContent = vmFmt(a.duration); });
+    a.addEventListener('timeupdate', () => {
+      if (a.duration) fill.style.width = (a.currentTime / a.duration * 100) + '%';
+      dur.textContent = vmFmt(a.currentTime);
+    });
+    a.addEventListener('ended', () => {
+      a.currentTime = 0;
+      fill.style.width = '0%';
+      vmEl.querySelector('.vm-play').textContent = '▶';
+      dur.textContent = vmFmt(a.duration);
+    });
+  }
+  return a;
+}
+function vmFmt(s) {
+  if (!isFinite(s)) return '0:00';
+  s = Math.max(0, Math.floor(s));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function stopOtherVoices(exceptEl) {
+  document.querySelectorAll('.voice-msg.playing').forEach(el => {
+    if (el === exceptEl) return;
+    const a = vmPlayers.get(el);
+    if (a) { try { a.pause(); } catch {} }
+    el.classList.remove('playing');
+    el.querySelector('.vm-play').textContent = '▶';
+  });
+}
+function toggleVoice(vmEl) {
+  const a = vmAudio(vmEl);
+  if (a.paused) {
+    stopOtherVoices(vmEl);
+    a.play().then(() => {
+      vmEl.classList.add('playing');
+      vmEl.querySelector('.vm-play').textContent = '❚❚';
+    }).catch(() => toast('⚠ Cannot play this voice note', 'err'));
+  } else {
+    a.pause();
+    vmEl.classList.remove('playing');
+    vmEl.querySelector('.vm-play').textContent = '▶';
+  }
+}
+function seekVoice(vmEl, ev) {
+  const a = vmAudio(vmEl);
+  if (!a.duration) return;
+  const rect = vmEl.querySelector('.vm-wave').getBoundingClientRect();
+  const x = (ev.clientX !== undefined ? ev.clientX : rect.left) - rect.left;
+  a.currentTime = Math.min(Math.max(0, x / rect.width), 1) * a.duration;
+  vmEl.querySelector('.vm-wave > i').style.width = (a.currentTime / a.duration * 100) + '%';
+}
 
 /* reply */
 function startReply(id) {

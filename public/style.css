@@ -4,6 +4,14 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600&display=swap');
 
+/* native <audio> players (main grid, privateadmin, anywhere): the browser's
+   default chrome is white — invert it so it matches the dark theme.
+   (audio only; video is never touched — inverting would flip its content) */
+audio {
+  filter: invert(0.92) hue-rotate(180deg) contrast(1.04);
+  border-radius: 9px;
+}
+
 :root {
   /* palette */
   --bg: #07080f;
@@ -573,8 +581,44 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .msg .time { font-size: .68rem; color: var(--text-3); padding-right: 3px; font-family: var(--mono); }
 .msg .bubble { position: relative; }
 .chat-img { max-width: 100%; max-height: 260px; border-radius: 9px; display: block; cursor: zoom-in; border: 1px solid var(--border); margin-bottom: 4px; }
-/* chat voice notes + files */
-.chat-audio { width: 260px; max-width: 100%; display: block; }
+
+/* --------------- custom voice-note player (dark, elegant) ---------------
+   play button + fake waveform bars + duration, matches the site theme   */
+.voice-msg {
+  display: flex; align-items: center; gap: 11px;
+  background: rgba(3, 4, 10, .45); border: 1px solid var(--border);
+  border-radius: 14px; padding: 9px 13px; min-width: 215px; max-width: 270px;
+  transition: border-color .15s;
+}
+.voice-msg:hover { border-color: var(--border-2); }
+.msg.mine .voice-msg { border-color: rgba(124, 108, 255, .45); background: rgba(124, 108, 255, .08); }
+.msg.mine .voice-msg:hover { border-color: rgba(124, 108, 255, .7); }
+.voice-msg.playing .vm-play { box-shadow: 0 0 0 5px rgba(124, 108, 255, .18); }
+.vm-play {
+  width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; flex: none;
+  background: linear-gradient(135deg, #7c6cff, #9d8bff); color: #fff;
+  font-size: .72rem; display: grid; place-items: center;
+  transition: transform .12s, box-shadow .15s;
+}
+.vm-play:hover { transform: scale(1.07); }
+.vm-play:active { transform: scale(.95); }
+.vm-wave {
+  flex: 1; height: 26px; position: relative; cursor: pointer; border-radius: 6px; overflow: hidden;
+  /* dim waveform bars */
+  background: repeating-linear-gradient(90deg, rgba(148, 163, 184, .3) 0 3px, transparent 3px 7px);
+  background-position: center;
+}
+.vm-wave > i {
+  position: absolute; inset: 0 auto 0 0; width: 0%; border-radius: 6px;
+  /* bright played bars (clipped to progress) */
+  background: repeating-linear-gradient(90deg, rgba(124, 108, 255, .95) 0 3px, transparent 3px 7px);
+  transition: width .12s linear;
+}
+.voice-msg.playing .vm-wave { background: repeating-linear-gradient(90deg, rgba(148, 163, 184, .4) 0 3px, transparent 3px 7px); }
+.vm-dur { font-size: .74rem; color: var(--text-3); font-family: var(--mono); flex: none; min-width: 36px; text-align: right; }
+.voice-msg.playing .vm-dur { color: #93a4ff; }
+
+/* chat files */
 .chat-file {
   display: flex; align-items: center; gap: 10px; padding: 9px 12px;
   background: rgba(3, 4, 10, .5); border: 1px solid var(--border); border-radius: 10px;

@@ -12,7 +12,7 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const MSG = 'PERMANENT chat memory archive: overflow beyond the 1500/room cap now moves to chats_archive.json (backed up to MEGA+GitHub forever, never dropped) — verified the public room had silently lost pre-cap history; admin can now move ALL items to the recycle bin in one click (restorable); archive restores on boot';
+  const MSG = 'beautiful dark voice-note player for chat (circular play button, waveform progress with click-to-seek, live duration) + native audio players dark-themed everywhere + fixed stale sendImage handler breaking chat uploads';
   const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);
