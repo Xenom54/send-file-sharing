@@ -279,6 +279,8 @@ $('#btnClearLogs').addEventListener('click', async () => {
 async function loadAll() {
   try {
     const rows = await (await fetch('/api/admin/items/all')).json();
+    const live = rows.filter(i => !i.deleted).length;
+    $('#allCount').textContent = `${rows.length} items · ${live} live`;
     $('#allBody').innerHTML = rows.length ? rows.map(it => `<tr>
       <td class="nowrap">${esc(fmtTime(it.createdAt))}</td>
       <td><span class="badge ${it.type}">${it.type}</span></td>
@@ -290,6 +292,20 @@ async function loadAll() {
     </tr>`).join('') : `<tr><td colspan="7" class="muted" style="text-align:center;padding:34px">No items.</td></tr>`;
   } catch { toast('⚠ Failed to load items', 'err'); }
 }
+
+/* move ALL items to the recycle bin (restorable) */
+$('#btnTrashAll').addEventListener('click', async () => {
+  if (!confirm('Move ALL items to the recycle bin?\nNothing is destroyed — you can restore everything from the Recycle tab.')) return;
+  const btn = $('#btnTrashAll');
+  btn.disabled = true; btn.textContent = 'Moving…';
+  try {
+    const r = await fetch('/api/admin/items/soft-delete-all', { method: 'POST' });
+    const d = await r.json();
+    if (r.ok) { toast(`✓ ${d.moved} items moved to the recycle bin`); loadAll(); loadStats(); }
+    else toast('⚠ ' + (d.error || 'Failed'), 'err');
+  } catch { toast('⚠ Failed', 'err'); }
+  btn.disabled = false; btn.textContent = '🗑 Move ALL to recycle bin';
+});
 
 /* ------------------------------ RECYCLE BIN ------------------------------- */
 async function loadTrash() {

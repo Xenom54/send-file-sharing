@@ -30,6 +30,7 @@ const paths = {
   items: path.join(DATA_DIR, 'items.json'),
   logs: path.join(DATA_DIR, 'logs.json'),
   chats: path.join(DATA_DIR, 'chats.json'),
+  chatsArchive: path.join(DATA_DIR, 'chats_archive.json'),
   owners: path.join(DATA_DIR, 'owners.json'),
   visitors: path.join(DATA_DIR, 'visitors.json'),
   privateadmin: path.join(DATA_DIR, 'privateadmin.json'),
@@ -395,6 +396,18 @@ app.delete('/api/items/:id', requireAdmin, (req, res) => {
   it.deleted = true; it.deletedAt = Date.now(); saveItems();
   log('delete', `${it.type}: ${it.title}`, req);
   res.json({ ok: true });
+});
+
+/* ADMIN: move ALL items to the recycle bin in one click (restorable) */
+app.post('/api/admin/items/soft-delete-all', requireAdmin, (req, res) => {
+  let moved = 0;
+  const now = Date.now();
+  for (const it of items) {
+    if (!it.deleted) { it.deleted = true; it.deletedAt = now; moved++; }
+  }
+  if (moved) saveItems();
+  log('delete_all', `${moved} items moved to the recycle bin`, req);
+  res.json({ ok: true, moved });
 });
 
 // ---- downloads / serving files
@@ -794,10 +807,27 @@ function chatHistoryOlder(room, before) {
   const chunk = older.slice(-CHAT_PAGE);
   return { msgs: chunk, hasMore: older.length > chunk.length };
 }
+/* MEMORY ARCHIVE: the live file keeps only the latest 1500 per room, but the
+   overflow is NEVER dropped — it moves to chats_archive.json, which is backed
+   up to MEGA + GitHub forever. Deleted messages keep their deleted:true mark
+   in both files.                                                              */
+const chatsArchive = readJSON(paths.chatsArchive, {});
+function saveChatsArchive() {
+  writeJSON(paths.chatsArchive, chatsArchive);
+  backupPush('data', 'chats_archive.json');
+  megaPush('data', 'chats_archive.json');
+}
 function saveChat(room, msg) {
   if (!chats[room]) chats[room] = [];
   chats[room].push(msg);
-  if (chats[room].length > 1500) chats[room] = chats[room].slice(-1500); // cap live file (incl. deleted kept for backups)
+  if (chats[room].length > 1500) {
+    // overflow → permanent archive (backed up, never lost)
+    const overflow = chats[room].slice(0, chats[room].length - 1500);
+    if (!chatsArchive[room]) chatsArchive[room] = [];
+    chatsArchive[room].push(...overflow);
+    chats[room] = chats[room].slice(-1500);
+    saveChatsArchive();
+  }
   saveChats();
 }
 
@@ -1363,6 +1393,7 @@ const RESTORE_DATA_FILES = [
   ['items.json', paths.items],
   ['logs.json', paths.logs],
   ['chats.json', paths.chats],
+  ['chats_archive.json', paths.chatsArchive],
   ['owners.json', paths.owners],
   ['visitors.json', paths.visitors],
   ['privateadmin.json', paths.privateadmin],
@@ -1381,7 +1412,7 @@ async function megaRestoreData() {
       if (buf) { fs.writeFileSync(target, buf); restored++; }
     } catch (e) { console.error('[mega] restore', name, e.message); }
   }
-  console.log(`[mega] restored ${restored}/6 data files`);
+  console.log(`[mega] restored /9 data files`);
   return restored;
 }
 
@@ -1395,7 +1426,7 @@ async function backupRestoreData() {
       if (f && f.content) { fs.writeFileSync(target, Buffer.from(f.content, 'base64')); restored++; }
     } catch (e) { console.error('[backup] restore', name, e.message); }
   }
-  console.log(`[backup] restored ${restored}/6 data files`);
+  console.log(`[backup] restored /9 data files`);
   return restored;
 }
 

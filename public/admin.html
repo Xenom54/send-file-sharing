@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=17">
+  <link rel="stylesheet" href="/static/style.css?v=19">
 </head>
 <body>
   <nav class="navbar">
@@ -131,6 +131,11 @@
 
     <!-- ============ ITEMS ============ -->
     <div class="apane hidden" id="apane-items">
+      <div class="items-toolbar">
+        <span class="count" id="allCount"></span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn small danger" id="btnTrashAll" title="Move every item to the recycle bin (restorable)">🗑 Move ALL to recycle bin</button>
+      </div>
       <div class="card tablewrap">
         <table class="logtable">
           <thead><tr><th>Time</th><th>Type</th><th>Title / name</th><th>Size</th><th>Uploader IP</th><th>Status</th><th></th></tr></thead>
@@ -201,6 +206,6 @@
   <footer class="footer" style="margin-top:40px">
     <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div></footer>
   <div class="toasts" id="toasts"></div>
-  <script src="/static/admin.js?v=17"></script>
+  <script src="/static/admin.js?v=19"></script>
 </body>
 </html>
