@@ -1147,7 +1147,7 @@ io.on('connection', (socket) => {
         socket.join('stream:' + c);
         io.to('stream:' + c).emit('stream_host', { code: c, hostId: socket.id });
         // restore the host's live viewer list after the reconnect
-        socket.emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name) });
+        socket.emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
         if (ack) ack({ ok: true, code: c, reAdopted: true });
         log('stream_start', `code=${c} host RECONNECTED (adopted)`, reqLikeS());
         return;
@@ -1180,7 +1180,7 @@ io.on('connection', (socket) => {
         return ack && ack({ error: 'wrong stream password' });
       }
       socket.join('stream:' + c);
-      s.viewers.set(socket.id, { name: String(data?.name || 'anonymous').slice(0, 30) });
+      s.viewers.set(socket.id, { name: String(data?.name || 'anonymous').slice(0, 30), active: true });
       streamRole = 'viewer';
       streamJoined = c;
       socket.data.streamCode = c;
@@ -1188,7 +1188,7 @@ io.on('connection', (socket) => {
       // announce the join to the WHOLE room (host + viewers) so voice-mesh peers can learn each other
       io.to('stream:' + c).emit('stream_viewer', { id: socket.id, name: s.viewers.get(socket.id).name, count: s.viewers.size });
       // full viewer list for the host's live panel
-      io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name) });
+      io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
       socket.emit('stream_chat_history', s.chat || []);
       io.emit('stream_update', { streams: streamListPublic() });
       log('stream_join', `code=${c} name=${data?.name}`, reqLikeS());
@@ -1215,6 +1215,20 @@ io.on('connection', (socket) => {
       log('stream_admin_watch', `code=${c} (secret)`, reqLikeS());
       if (ack) ack({ ok: true, code: c, host: s.hostName, hostId: s.hostId });
     } catch (e) { console.error('[stream admin join]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  /* viewer reports whether they are ACTIVELY watching right now (tab visible
+     + focused). The host's viewer list shows green (watching now) or gray
+     (joined but in another tab/page) dots from this.                     */
+  socket.on('stream_watching', (data) => {
+    try {
+    if (streamRole !== 'viewer' || !streamJoined) return;
+    const s = liveStreams[streamJoined];
+    const me = s && s.viewers.get(socket.id);
+    if (!me) return;
+    me.active = !!(data && data.active);
+    io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
+    } catch (e) { console.error('[stream watching]', e.message); }
   });
 
   /* stream mini chat: text + images, shared by host and viewers */
@@ -1286,7 +1300,7 @@ io.on('connection', (socket) => {
           // announce to the WHOLE room so voice-mesh peers drop this peer's audio
           io.to('stream:' + streamJoined).emit('stream_viewer_left', { id: socket.id, count: s.viewers.size });
           // refresh the host's live viewer list
-          io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name) });
+          io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
           io.emit('stream_update', { streams: streamListPublic() });
         }
       }

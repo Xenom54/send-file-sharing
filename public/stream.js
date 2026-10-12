@@ -173,18 +173,19 @@ socket.on('stream_viewer_left', ({ count }) => {
   $('#viewerCount').textContent = count + (count === 1 ? ' viewer' : ' viewers');
 });
 
-/* live viewer list beside the stream (deduped by name — the same person on
-   two tabs would otherwise appear twice) */
-socket.on('stream_viewers', ({ names }) => {
-  const seen = new Set();
-  const unique = (names || []).filter(n => {
-    if (seen.has(n)) return false;
-    seen.add(n);
-    return true;
+/* live viewer list beside the stream: 🟢 green = watching right now (the
+   stream tab is visible + focused), ⚪ gray = joined but in another tab/page.
+   Deduped by name — if the same person has two tabs, green wins. */
+socket.on('stream_viewers', ({ viewers }) => {
+  const byName = new Map();
+  (viewers || []).forEach(v => {
+    const prev = byName.get(v.name);
+    byName.set(v.name, { active: (prev ? prev.active : false) || !!v.active });
   });
-  $('#viewersListCount').textContent = unique.length;
-  $('#viewerList').innerHTML = unique.length
-    ? unique.map(n => `<div class="viewer-row"><span class="vdot"></span><span class="vname">${esc(n)}</span></div>`).join('')
+  const list = [...byName.entries()];
+  $('#viewersListCount').textContent = list.length;
+  $('#viewerList').innerHTML = list.length
+    ? list.map(([n, v]) => `<div class="viewer-row" title="${v.active ? 'Watching right now' : 'Joined, but not watching right now'}"><span class="vdot ${v.active ? 'on' : 'off'}"></span><span class="vname">${esc(n)}</span></div>`).join('')
     : '<div class="small muted">Nobody is watching yet.</div>';
 });
 
@@ -252,9 +253,20 @@ $('#watchGo').addEventListener('click', () => {
     $('#gate').classList.add('hidden');
     $('#watchView').classList.remove('hidden');
     $('#watchTitle').textContent = ack.code + ' by ' + ack.host;
+    emitWatching(); // tell the host whether we're actively watching right now
   });
 });
 $('#watchPw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#watchGo').click(); });
+
+/* watching state: green dot = this tab is visible & focused RIGHT NOW,
+   gray = joined but looking elsewhere. Reported on join and on every change. */
+function emitWatching() {
+  if (role !== 'viewer' || !myCode) return;
+  socket.emit('stream_watching', { active: document.visibilityState === 'visible' && document.hasFocus() });
+}
+document.addEventListener('visibilitychange', emitWatching);
+window.addEventListener('focus', emitWatching);
+window.addEventListener('blur', emitWatching);
 
 $('#btnLeaveStream').addEventListener('click', () => { cleanupViewer(); showGate(); });
 function cleanupViewer() {
@@ -592,6 +604,7 @@ function autoJoin(code, pw) {
       $('#gate').classList.add('hidden');
       $('#watchView').classList.remove('hidden');
       $('#watchTitle').textContent = ack.code + ' by ' + ack.host;
+      emitWatching(); // tell the host whether we're actively watching right now
       if (location.hash !== '#' + code) history.replaceState(null, '', '/stream#' + code);
     } else if (ack && ack.error === 'wrong stream password') {
       // locked stream: ask for the password BEFORE showing anything

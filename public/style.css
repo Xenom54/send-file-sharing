@@ -801,6 +801,25 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
 /* ------------------------------- stream page ------------------------------- */
+.viewers-panel {
+  width: 220px; flex: none; padding: 12px;
+  max-height: 76vh; overflow-y: auto;
+  scrollbar-width: none;
+}
+.viewers-panel::-webkit-scrollbar { display: none; }
+.viewers-panel.collapsed .viewer-list { display: none; }
+.panel-toggle {
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  font-size: .78rem; padding: 2px 6px; border-radius: 6px; margin-left: auto;
+}
+.panel-toggle:hover { color: var(--text); background: var(--surface-2); }
+/* dots: green = watching right now, gray = joined but elsewhere */
+.vdot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.vdot.on { background: #34d399; box-shadow: 0 0 7px rgba(52, 211, 153, .65); }
+.vdot.off { background: #64748b; }
+@media (max-width: 1000px) {
+  .viewers-panel { width: 100%; max-height: 200px; }
+}
 .stream-layout { display: flex; gap: 14px; align-items: stretch; margin-top: 14px; }
 .stream-chat {
   width: 320px; flex: none; padding: 14px; display: flex; flex-direction: column;

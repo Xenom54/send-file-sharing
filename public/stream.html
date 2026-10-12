@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Stream</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=33">
+  <link rel="stylesheet" href="/static/style.css?v=34">
 </head>
 <body>
   <nav class="navbar">
@@ -97,6 +97,12 @@
       <button class="btn small danger" id="btnStopStream">⏹ Stop</button>
     </div>
     <div class="stream-layout">
+      <aside class="card viewers-panel" id="viewersPanel">
+        <div class="ph">👀 Watching now <span class="pill" id="viewersListCount">0</span>
+          <button class="panel-toggle" id="viewersToggle" title="Hide/show the list">▾</button>
+        </div>
+        <div class="viewer-list" id="viewerList"></div>
+      </aside>
       <div style="flex:1;min-width:0">
         <div class="card" style="padding:14px">
           <video id="hostPreview" autoplay muted playsinline style="width:100%;border-radius:12px;background:#000;display:none"></video>
@@ -121,9 +127,7 @@
         <div class="small muted" style="margin-top:10px">Share this link: <span class="mono" id="shareLink" style="color:#93a4ff;user-select:all"></span></div>
       </div>
       <aside class="card stream-chat">
-        <div class="ph">👀 Watching now <span class="pill" id="viewersListCount">0</span></div>
-        <div class="viewer-list" id="viewerList"></div>
-        <div class="ph" style="margin-top:12px">Stream chat <span class="pill" id="scCount">0</span></div>
+        <div class="ph">Stream chat <span class="pill" id="scCount">0</span></div>
         <div class="sc-messages" id="scMessages"></div>
         <div class="sc-input">
           <button class="btn icon" id="scImg" title="Send an image">＋</button>
@@ -171,9 +175,9 @@
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=33"></script>
-  <script src="/static/profile.js?v=33"></script>
-  <script src="/static/bidi.js?v=33"></script>
-  <script src="/static/stream.js?v=33"></script>
+  <script src="/static/notify.js?v=34"></script>
+  <script src="/static/profile.js?v=34"></script>
+  <script src="/static/bidi.js?v=34"></script>
+  <script src="/static/stream.js?v=34"></script>
 </body>
 </html>
