@@ -672,9 +672,19 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
   border-left: 3px solid var(--accent); padding: 5px 9px; margin-bottom: 5px;
   background: rgba(124, 108, 255, .09); border-radius: 0 7px 7px 0;
   font-size: .8rem; color: var(--text-2);
+  cursor: pointer; transition: background .15s;
 }
+.reply-quote:hover { background: rgba(124, 108, 255, .2); color: var(--text); }
 .reply-quote b { color: #93a4ff; font-size: .74rem; }
 .edited-tag { font-size: .66rem; color: var(--text-3); margin-inline-start: 6px; }
+/* flash highlight when jumping to the original message */
+.msg-highlight .bubble {
+  animation: msghl 2s ease-out;
+}
+@keyframes msghl {
+  0% { background: rgba(124, 108, 255, .45); border-color: rgba(124, 108, 255, .9); box-shadow: 0 0 0 4px rgba(124, 108, 255, .25); }
+  100% { }
+}
 
 /* unread dot */
 .unread-dot {
@@ -744,13 +754,16 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 
 .chat-input { padding: 13px 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; background: rgba(255, 255, 255, .02); align-items: flex-end; }
 .chat-input input { flex: 1; }
-/* multiline chat box: Enter sends, Shift+Enter breaks a line; grows up to ~5 rows */
+/* multiline chat box: Enter sends, Shift+Enter breaks a line; grows up to ~5 rows.
+   The scrollbar strip is hidden (scrolling still works) — cleaner look */
 #msgInput {
   flex: 1; resize: none; overflow-y: auto;
   min-height: 42px; max-height: 118px;
   line-height: 1.45; padding: 10px 14px;
   font-family: inherit; font-size: .93rem;
+  scrollbar-width: none; -ms-overflow-style: none;
 }
+#msgInput::-webkit-scrollbar { width: 0; height: 0; display: none; }
 #msgInput:focus { outline: none; }
 
 .gate { max-width: 480px; margin: 66px auto; padding: 32px; }
@@ -782,7 +795,9 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
   flex: 1; min-width: 0; resize: none; overflow-y: auto;
   min-height: 36px; max-height: 76px;
   padding: 8px 10px; font-size: .84rem; line-height: 1.4;
+  scrollbar-width: none; -ms-overflow-style: none;
 }
+#scInput::-webkit-scrollbar, #scInputV::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .sc-input .btn.icon { padding: 6px 8px; font-size: .9rem; }
 #btnMic.mic-on { background: rgba(52, 211, 153, .16); border-color: rgba(52, 211, 153, .55); animation: recpulse 1.2s infinite; }
 #btnHostMic.mic-on { background: rgba(52, 211, 153, .16); border-color: rgba(52, 211, 153, .55); animation: recpulse 1.2s infinite; }

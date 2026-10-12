@@ -211,7 +211,7 @@ Roughly in file order:
 
 ## 10. Where we left off / recent history
 
-Recent releases: v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
+Recent releases: v3.12.0 reply-quote jump-to-original (auto-loads older pages) + hidden scrollbar strips in the writing boxes, v3.11.0 security audit + this handoff file, v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
 `sendImage` handler that had silently broken chat file uploads, v3.8.0 permanent
 chats_archive + bulk recycle, v3.7.0 direct `#public`/`#kali` links, v3.6.0 Linux audio
 fallback panel, v3.5.0 Arabic filenames, v3.4.0 full voice mesh.

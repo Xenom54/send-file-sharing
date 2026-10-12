@@ -12,7 +12,7 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); console.log('  done', f.path); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const MSG = 'SECURITY AUDIT RELEASE: panel passwords moved from URLs to x-pw headers; timing-safe compares; shared brute-force lockout on ALL hidden-panel logins; nosniff on every upload response; chat flood guard (10 msgs/5s per socket); Kali rate-limit (1 Gemini call per ip+room per 8s); full XSS sweep clean; 51-check bug sweep (syntax, stale identifiers, DOM ids, cache unification v=23); NEW: AI_HANDOFF.md — complete technical handoff documentation for AI/dev continuation';
+  const MSG = 'v3.12.0: clicking a reply quote jumps to the original message (auto-loads older history pages until found, flash-highlight on arrival); scrollbar strips hidden in the chat/stream writing boxes; AI_HANDOFF updated';
   const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);

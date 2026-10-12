@@ -463,7 +463,7 @@ function bubbleHTML(m, mine) {
     ? `<div class="msg-text" dir="auto">${esc(m.text)}${m.edited ? '<span class="edited-tag">(edited)</span>' : ''}</div>`
     : (media ? '' : '<div class="msg-text muted">(empty)</div>');
   const quote = m.replyTo
-    ? `<div class="reply-quote" dir="auto"><b>${esc(m.replyTo.name)}</b><br>${esc(m.replyTo.text)}</div>` : '';
+    ? `<div class="reply-quote" dir="auto" data-quote-of="${esc(m.replyTo.id)}" title="Click to jump to the original message"><b>${esc(m.replyTo.name)}</b><br>${esc(m.replyTo.text)}</div>` : '';
   return `${media}${quote}${txt}${actionsHTML(m, mine)}`;
 }
 
@@ -523,9 +523,39 @@ $('#messages').addEventListener('click', e => {
   if (vmPlay) return toggleVoice(vmPlay.closest('.voice-msg'));
   const vmWave = e.target.closest('.vm-wave');
   if (vmWave) return seekVoice(vmWave.closest('.voice-msg'), e);
+  const quote = e.target.closest('[data-quote-of]');
+  if (quote) return jumpToMessage(quote.dataset.quoteOf);
   const zoom = e.target.closest('.zoomable');
   if (zoom) openLightbox(zoom.dataset.full || zoom.src);
 });
+
+/* clicking a reply quote jumps to the original message — loading older
+   history pages automatically if it scrolled out of the loaded window */
+async function jumpToMessage(id) {
+  let el = $('#messages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
+  if (!el) {
+    toast('Loading older messages…');
+    for (let i = 0; i < 20 && !el; i++) {
+      const oldest = lastMsgs[0]?.ts;
+      if (!oldest) break;
+      const d = await new Promise(res => socket.emit('history_more', { before: oldest }, res));
+      if (!d || !d.msgs || !d.msgs.length) break; // reached the very beginning
+      const box = $('#messages');
+      const beforeH = box.scrollHeight;
+      lastMsgs = d.msgs.concat(lastMsgs);
+      d.msgs.slice().reverse().forEach(m => appendMsg(m, m.uid === store.uid, { prepend: true }));
+      box.scrollTop += box.scrollHeight - beforeH;
+      el = $('#messages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
+      if (!d.hasMore) break;
+    }
+  }
+  if (!el) return toast('⚠ The original message was deleted or is too old', 'err');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('msg-highlight');
+  void el.offsetWidth; // restart the animation
+  el.classList.add('msg-highlight');
+  setTimeout(() => el.classList.remove('msg-highlight'), 2000);
+}
 
 /* ---------------- custom voice-note player (dark, elegant) ----------------
    One audio element per message bubble (WeakMap → dies with the DOM node),
