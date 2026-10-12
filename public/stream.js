@@ -82,19 +82,30 @@ $('#hostGo').addEventListener('click', async () => {
   const btn = $('#hostGo');
   btn.disabled = true; btn.textContent = 'Starting…';
   try {
-    // quality: 1080p-class capture at 60 fps (acceptance: at least 720p60)
-    localStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        frameRate: { ideal: 60, min: 30, max: 60 },
-      },
-      audio: true,
-    });
+    // quality: 1080p-class capture at 60 fps. NOTE: `min` constraints are HARD
+    // requirements — devices that can't guarantee them throw
+    // OverconstrainedError before the picker even opens, so only `ideal`/`max` here.
+    try {
+      localStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 60, max: 60 },
+        },
+        audio: true,
+      });
+    } catch (e1) {
+      // any constraint failure → fall back to the simplest possible request
+      if (e1 && e1.name === 'NotAllowedError') throw e1; // user denied — don't retry
+      localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    }
     // tell WebRTC this is screen content → encoder prioritizes sharpness
     localStream.getVideoTracks()[0].contentHint = 'detail';
   } catch (e) {
-    $('#hostErr').textContent = 'Screen permission denied';
+    const why = e && e.name === 'NotAllowedError' ? 'Screen share was denied — click Start again and pick a screen, then Allow.'
+      : e && e.name === 'NotReadableError' ? 'Your screen is protected by the system (DRM/secure desktop) and cannot be captured.'
+      : 'Could not start screen capture' + (e && e.name ? ' (' + e.name + ')' : '') + ' — try again or use another browser.';
+    $('#hostErr').textContent = why;
     btn.disabled = false; btn.textContent = 'Start streaming';
     return;
   }
@@ -117,6 +128,8 @@ $('#hostGo').addEventListener('click', async () => {
     $('#hostView').classList.remove('hidden');
     $('#hostPreview').srcObject = localStream;
     $('#shareLink').textContent = location.origin + '/stream#' + myCode;
+    // the URL carries the stream code — anyone you send it to joins directly
+    if (location.hash !== '#' + myCode) history.replaceState(null, '', '/stream#' + myCode);
     toast('📡 You are live!');
     // if the user clicks the browser's native "stop sharing" button
     localStream.getVideoTracks()[0]?.addEventListener('ended', () => stopHosting());
@@ -557,14 +570,49 @@ function showGate() {
   $('#gate').classList.remove('hidden');
   $('#hostView').classList.add('hidden');
   $('#watchView').classList.add('hidden');
+  if (location.hash) history.replaceState(null, '', '/stream'); // clean URL off the stream
   socket.emit('stream_list', (d) => d && renderLive(d.streams));
 }
 
-/* auto-fill from #code in the link */
-if (location.hash.length > 1) {
-  const code = decodeURIComponent(location.hash.slice(1)).trim().toLowerCase();
-  if (code) { $('#watchCode').value = code; openWatch(); }
+/* ============ direct-entry links: /stream#code ============
+   Opens the stream as a viewer INSTANTLY (no gate). If the stream is
+   password-protected, the password is asked BEFORE any content shows.   */
+function hashTarget() {
+  if (location.hash.length < 2) return null;
+  return decodeURIComponent(location.hash.slice(1)).trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
 }
+function autoJoin(code, pw) {
+  socket.emit('stream_join', { code, pw: pw || '', name: myName() }, (ack) => {
+    if (ack && ack.ok) {
+      role = 'viewer';
+      myCode = ack.code;
+      hostId = ack.hostId;
+      lastJoinPw = pw || '';
+      $('#watchModal').classList.remove('open');
+      $('#gate').classList.add('hidden');
+      $('#watchView').classList.remove('hidden');
+      $('#watchTitle').textContent = ack.code + ' by ' + ack.host;
+      if (location.hash !== '#' + code) history.replaceState(null, '', '/stream#' + code);
+    } else if (ack && ack.error === 'wrong stream password') {
+      // locked stream: ask for the password BEFORE showing anything
+      $('#watchCode').value = code;
+      $('#watchPw').value = '';
+      $('#watchPwField').classList.remove('hidden');
+      $('#watchErr').textContent = 'This stream is locked — enter its password';
+      $('#watchModal').classList.add('open');
+      setTimeout(() => $('#watchPw').focus(), 60);
+    } else {
+      toast('⚠ ' + (ack?.error || 'This stream is not live right now'), 'err');
+    }
+  });
+}
+function enterFromHash() {
+  const code = hashTarget();
+  if (!code) return false;
+  Profile.ensureModal().then(() => autoJoin(code));
+  return true;
+}
+enterFromHash();
 
 /* ============ silent rejoin: a socket blip must never kill the stream ============
    WebRTC media keeps flowing on its own. When the signaling socket comes
