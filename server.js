@@ -189,6 +189,14 @@ function requireAdmin(req, res, next) {
   res.status(401).json({ error: 'unauthorized' });
 }
 
+/* timing-safe password comparison (no early-exit string equality leaks) */
+function safeEq(a, b) {
+  const ba = Buffer.from(String(a || ''));
+  const bb = Buffer.from(String(b || ''));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
 /* brute-force protection for admin login */
 const loginAttempts = new Map();
 const LOCK_WINDOW = 15 * 60e3, LOCK_MAX = 5;
@@ -307,13 +315,15 @@ app.get('/streamadmin', (req, res) => res.sendFile(path.join(__dirname, 'public'
 
 /* stream-admin password check */
 app.post('/api/streamadmin/login', (req, res) => {
+  if (panelLoginBlocked(req, res)) return;
   const pw = String(req.body?.pw || '');
-  if (pw !== STREAM_ADMIN_PASSWORD) { log('streamadmin_login', 'failed', req); return res.status(401).json({ error: 'wrong password' }); }
+  if (!requireStreamAdminPw(pw)) { log('streamadmin_login', 'failed', req); recordFail(req); return res.status(401).json({ error: 'wrong password' }); }
+  clearFails(req);
   log('streamadmin_login', 'success', req);
   res.json({ ok: true });
 });
 app.get('/api/streamadmin/streams', (req, res) => {
-  if (String(req.query.pw || '') !== STREAM_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
+  if (!requireStreamAdminPw(panelPw(req))) return res.status(401).json({ error: 'unauthorized' });
   res.json(Object.entries(liveStreams).map(([code, s]) => ({
     code, host: s.hostName, viewers: s.viewers.size, startedAt: s.startedAt, hasPw: !!s.pw,
   })));
@@ -431,14 +441,15 @@ app.get('/uploads/:filename', async (req, res) => {
 
   /* All types are accepted, but types that could run scripts in the browser
      (.html/.js/.svg/…) are ALWAYS served as forced downloads + octet-stream,
-     so they can never execute on the site's own origin.                    */
+     so they can never execute on the site's own origin.                   */
   const risky = /\.(html?|js|mjs|svg|xhtml|xml|hta)$/i.test(fn);
   const it = items.find(i => i.fileName === fn);
   const name = it ? it.originalName : fn;
+  // harden EVERY upload response against content-type sniffing
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (risky) {
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Disposition', cdAttachment(name));
     return res.sendFile(p);
   }
@@ -878,27 +889,35 @@ const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024, pingInterva
 
 function roomName(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40); }
 
+/* hidden-panel password: sent via the x-pw HEADER (never in the URL/query,
+   which can leak into logs and browser history). query kept as legacy only. */
+function panelPw(req) {
+  return String(req.headers['x-pw'] || req.query.pw || '');
+}
+
 /* rooms a private admin may browse */
 app.get('/api/chat/rooms', (req, res) => {
-  const pw = String(req.query.pw || '');
-  if (pw !== PRIVATE_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
+  if (!requirePrivateAdminPw(panelPw(req))) return res.status(401).json({ error: 'unauthorized' });
   res.json(Object.keys(chats).map(name => ({ name, count: (chats[name] || []).length })));
 });
 
 /* private admin login check (for the hidden /privateadmin page) */
 app.post('/api/privateadmin/login', (req, res) => {
+  if (panelLoginBlocked(req, res)) return;
   const pw = String(req.body?.pw || req.body?.password || '');
   if (!pw || !requirePrivateAdminPw(pw)) {
     log('privateadmin_login', 'failed', req);
+    recordFail(req);
     return res.status(401).json({ error: 'wrong password' });
   }
+  clearFails(req);
   log('privateadmin_login', 'success', req);
   res.json({ ok: true });
 });
 
 /* private admin: dashboard stats (rooms, members, online, public chat) */
 app.get('/api/chat/stats', (req, res) => {
-  if (!requirePrivateAdminPw(req.query.pw)) return res.status(401).json({ error: 'unauthorized' });
+  if (!requirePrivateAdminPw(panelPw(req))) return res.status(401).json({ error: 'unauthorized' });
   const rooms = Object.keys(chats).map(name => {
     const list = chats[name] || [];
     return {
@@ -932,7 +951,7 @@ app.get('/api/chat/stats', (req, res) => {
 
 /* private admin: who is online + everyone who ever entered a room */
 app.get('/api/chat/rooms/:room/visitors', (req, res) => {
-  if (!requirePrivateAdminPw(req.query.pw)) return res.status(401).json({ error: 'unauthorized' });
+  if (!requirePrivateAdminPw(panelPw(req))) return res.status(401).json({ error: 'unauthorized' });
   const room = roomName(req.params.room);
   if (!room) return res.status(400).json({ error: 'invalid room' });
   res.json({
@@ -957,8 +976,8 @@ app.post('/api/chat/rooms/:room', (req, res) => {
 
 /* private admin deletes any room (and its history) — never the public chat */
 app.delete('/api/chat/rooms/:room', (req, res) => {
-  const pw = String(req.query.pw || req.body?.pw || '');
-  if (pw !== PRIVATE_ADMIN_PASSWORD) return res.status(401).json({ error: 'unauthorized' });
+  const pw = panelPw(req) || String(req.body?.pw || '');
+  if (!requirePrivateAdminPw(pw)) return res.status(401).json({ error: 'unauthorized' });
   const room = roomName(req.params.room);
   if (!room) return res.status(400).json({ error: 'invalid room' });
   if (room === 'public') return res.status(403).json({ error: 'the public chat cannot be deleted' });
@@ -1014,15 +1033,31 @@ function recordVisit(room, name, uid, isAdmin, ip) {
     saveVisitors();
   }
 }
-function requirePrivateAdminPw(pw) { return String(pw || '') === PRIVATE_ADMIN_PASSWORD && !!PRIVATE_ADMIN_PASSWORD; }
+function requirePrivateAdminPw(pw) { return !!PRIVATE_ADMIN_PASSWORD && safeEq(pw, PRIVATE_ADMIN_PASSWORD); }
+function requireStreamAdminPw(pw) { return !!STREAM_ADMIN_PASSWORD && safeEq(pw, STREAM_ADMIN_PASSWORD); }
+/* hidden-panel logins share the same brute-force lockout as the admin login */
+function panelLoginBlocked(req, res) {
+  const wait = loginLock(req);
+  if (wait) { res.status(429).json({ error: `too many attempts, wait ${wait} minutes` }); return true; }
+  return false;
+}
 
 /* ------------------------------- Kali — AI bot ------------------------------
    One personality ("Kali"), powered by Gemini. Replies when mentioned (@kali)
    in any room; rooms named `ai-<uid>` are 1-on-1 chats where it replies to all. */
+/* Kali rate limit: one Gemini call per user every 8s (protects the API quota
+   from mention-spam; the bot simply stays quiet for over-eager users)      */
+const kaliLastCall = new Map();
 function maybeKaliReply(room, userName, text, reqLike) {
   const isKaliRoom = room && room.startsWith('ai-');
   const mentioned = /@(kali|ai)\b/i.test(String(text || ''));
   if (!isKaliRoom && !mentioned) return; // only mentions outside Kali rooms
+  const key = (reqLike && reqLike.socket && reqLike.socket.remoteAddress) + '|' + room;
+  const now = Date.now();
+  const last = kaliLastCall.get(key) || 0;
+  if (now - last < 8000) return; // throttled
+  if (kaliLastCall.size > 500) kaliLastCall.clear();
+  kaliLastCall.set(key, now);
   const prompt = String(text || '').replace(/@(kali|ai)\b/gi, '').trim();
 
   // short natural delay, then ask Gemini with the room's recent context
@@ -1291,6 +1326,12 @@ io.on('connection', (socket) => {
   socket.on('msg', (data) => {
     try {
     if (!room) return;
+    /* flood guard: max 10 messages per socket per 5 seconds (silent drop).
+       Normal humans can't hit this; scripts can't fill the room.            */
+    const now = Date.now();
+    socket.data.msgTimes = (socket.data.msgTimes || []).filter(ts => now - ts < 5000);
+    if (socket.data.msgTimes.length >= 10) return;
+    socket.data.msgTimes.push(now);
     const t = String(data?.text || '').slice(0, 4000);
     const img = String(data?.image || '').slice(0, 2000);
     const aud = String(data?.audio || '').slice(0, 2000);

@@ -45,7 +45,7 @@ async function enter() {
 /* ------------------------------- dashboard -------------------------------- */
 async function loadDashboard() {
   try {
-    const r = await fetch('/api/chat/stats?pw=' + encodeURIComponent(pw));
+    const r = await fetch('/api/chat/stats', { headers: { 'x-pw': pw } });
     if (r.status === 401) return location.reload();
     const s = await r.json();
 
@@ -96,7 +96,7 @@ $('#roomsGrid').addEventListener('click', async e => {
   if (open) return openRoom(open.dataset.open);
   if (del) {
     if (!confirm(`Delete room #${del.dataset.delroom} and all its messages?`)) return;
-    const r = await fetch(`/api/chat/rooms/${encodeURIComponent(del.dataset.delroom)}?pw=${encodeURIComponent(pw)}`, { method: 'DELETE' });
+    const r = await fetch(`/api/chat/rooms/${encodeURIComponent(del.dataset.delroom)}`, { method: 'DELETE', headers: { 'x-pw': pw } });
     if (r.ok) { toast('🗑 Room deleted'); loadDashboard(); }
     else toast('⚠ Delete failed', 'err');
   }
@@ -120,7 +120,7 @@ async function openRoom(room) {
 
 async function loadVisitors(room) {
   try {
-    const r = await fetch(`/api/chat/rooms/${encodeURIComponent(room)}/visitors?pw=${encodeURIComponent(pw)}`);
+    const r = await fetch(`/api/chat/rooms/${encodeURIComponent(room)}/visitors`, { headers: { 'x-pw': pw } });
     if (!r.ok) return;
     const d = await r.json();
     renderOnline(d.online || []);
@@ -151,7 +151,7 @@ $('#btnBack').addEventListener('click', () => {
 $('#btnDeleteRoom').addEventListener('click', async () => {
   if (!currentRoom) return;
   if (!confirm(`Delete room #${currentRoom} and all its messages?`)) return;
-  const r = await fetch(`/api/chat/rooms/${encodeURIComponent(currentRoom)}?pw=${encodeURIComponent(pw)}`, { method: 'DELETE' });
+  const r = await fetch(`/api/chat/rooms/${encodeURIComponent(currentRoom)}`, { method: 'DELETE', headers: { 'x-pw': pw } });
   if (r.ok) { toast('🗑 Room deleted'); $('#btnBack').click(); }
   else toast('⚠ Delete failed', 'err');
 });

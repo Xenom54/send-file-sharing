@@ -45,7 +45,7 @@ function enter() {
 
 async function loadStreams() {
   try {
-    const r = await fetch('/api/streamadmin/streams?pw=' + encodeURIComponent(pw));
+    const r = await fetch('/api/streamadmin/streams', { headers: { 'x-pw': pw } });
     if (r.status === 401) return location.reload();
     const list = await r.json();
     const totalViewers = list.reduce((n, s) => n + s.viewers, 0);
