@@ -350,6 +350,23 @@ $('#trashGrid').addEventListener('click', async e => {
   }
 });
 
+/* permanently destroy EVERYTHING in the recycle bin (irreversible, double-confirmed) */
+$('#btnPurgeAll').addEventListener('click', async () => {
+  const rows = await (await fetch('/api/admin/items/deleted')).json();
+  if (!rows.length) return toast('The recycle bin is already empty');
+  if (!confirm(`Permanently DESTROY all ${rows.length} items in the recycle bin?\nTheir uploaded files are deleted from the site AND the cloud backups.\nThis CANNOT be undone.`)) return;
+  if (!confirm(`Are you really sure? Type-confirmed: ${rows.length} items will be gone forever.`)) return;
+  const btn = $('#btnPurgeAll');
+  btn.disabled = true; btn.textContent = 'Destroying…';
+  try {
+    const r = await fetch('/api/admin/items/purge-all', { method: 'DELETE' });
+    const d = await r.json();
+    if (r.ok) { toast(`💥 ${d.purged} items permanently destroyed`); loadTrash(); loadAll(); loadStats(); }
+    else toast('⚠ ' + (d.error || 'Failed'), 'err');
+  } catch { toast('⚠ Failed', 'err'); }
+  btn.disabled = false; btn.textContent = '💥 Delete ALL permanently';
+});
+
 /* -------------------------------- SETTINGS -------------------------------- */
 $('#btnChangePw').addEventListener('click', async () => {
   const pw = $('#newPw').value;

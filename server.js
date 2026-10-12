@@ -526,6 +526,24 @@ app.delete('/api/admin/items/:id/purge', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ADMIN: permanently destroy EVERY item in the recycle bin (irreversible) */
+app.delete('/api/admin/items/purge-all', requireAdmin, (req, res) => {
+  const trashed = items.filter(i => i.deleted);
+  for (const it of trashed) {
+    if (it.fileName) {
+      try { fs.unlinkSync(path.join(UPLOAD_DIR, it.fileName)); } catch {}
+      if (backup.configured()) backup.remove('uploads/' + it.fileName).catch(e => console.error('[backup] remove', e.message));
+      if (mega.configured()) mega.remove('uploads', it.fileName).catch(e => console.error('[mega] remove', e.message));
+    }
+  }
+  const keep = items.filter(i => !i.deleted);
+  items.length = 0;
+  items.push(...keep);
+  saveItems();
+  log('purge_all', `${trashed.length} items permanently destroyed`, req);
+  res.json({ ok: true, purged: trashed.length });
+});
+
 app.delete('/api/admin/logs', requireAdmin, (req, res) => {
   logs.length = 0; saveLogs();
   log('clear_logs', 'all logs cleared', req);
