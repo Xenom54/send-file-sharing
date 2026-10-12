@@ -209,6 +209,8 @@ function startChat(code) {
   $('#gate').classList.add('hidden');
   $('#chatWrap').classList.remove('hidden');
   $('#messages').innerHTML = '';
+  // app-like layout: the page itself stops scrolling — only the messages area does
+  document.body.classList.add('chat-mode');
   if (!socket.connected) socket.connect();
   // the URL always reflects the room: #public / #kali / #roomcode → shareable direct links
   const h = code === 'public' ? '#public' : code.startsWith('ai-') ? '#kali' : '#' + code;
@@ -467,20 +469,26 @@ function bubbleHTML(m, mine) {
   return `${media}${quote}${txt}${actionsHTML(m, mine)}`;
 }
 
-/* message grouping: same sender within the SAME MINUTE → stacked as one block
-   with ONE name and ONE time (exactly as requested) */
+/* message grouping: same sender within the SAME MINUTE → stacked as one block.
+   The name shows on the FIRST message; the TIME lives under the LAST one and
+   "travels" down as new messages keep arriving in the same minute. */
 let lastRendered = null; // {uid, name, ts, sys}
 function appendMsg(m, mine, opts = {}) {
   const el = document.createElement('div');
   const grouped = !opts.prepend && lastRendered && !lastRendered.sys &&
     lastRendered.uid === m.uid && lastRendered.name === m.name &&
     fmtTime(lastRendered.ts) === fmtTime(m.ts); // same displayed minute
+  // the time belongs to the newest message of the burst — take it from the previous one
+  if (grouped) {
+    const prev = $('#messages').lastElementChild;
+    if (prev && prev.classList.contains('msg')) prev.querySelector('.time')?.remove();
+  }
   el.className = 'msg' + (mine ? ' mine' : '') + (m.admin ? ' admin-msg' : '') + (m.bot ? ' bot-msg' : '') + (grouped ? ' msg-grouped' : '');
   el.dataset.mid = m.id;
   const who = m.bot ? 'Kali' : `${esc(m.name)}${m.admin ? ' 🛡️' : ''}${mine ? ' (you)' : ''}`;
   el.innerHTML = `${grouped ? '' : `<div class="who">${who}</div>`}
     <div class="bubble">${bubbleHTML(m, mine)}</div>
-    ${grouped ? '' : `<div class="time">${esc(fmtTime(m.ts))}</div>`}`;
+    <div class="time">${esc(fmtTime(m.ts))}</div>`;
   if (opts.prepend) $('#messages').prepend(el);
   else {
     $('#messages').appendChild(el);

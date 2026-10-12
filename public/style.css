@@ -12,6 +12,33 @@ audio {
   border-radius: 9px;
 }
 
+/* ---- custom scrollbars: small, subtle, contrasting with the dark bg ---- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(124, 108, 255, .22); border-radius: 99px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: rgba(124, 108, 255, .45); }
+::-webkit-scrollbar-corner { background: transparent; }
+html { scrollbar-width: thin; scrollbar-color: rgba(124, 108, 255, .25) transparent; }
+
+/* ---- chat mode: app-like page — the page never scrolls, only messages do ---- */
+body.chat-mode { overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+body.chat-mode .navbar { flex: none; }
+body.chat-mode .wrap {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  padding-top: 12px; padding-bottom: 12px;
+}
+body.chat-mode #chatWrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+body.chat-mode .chat-app { flex: 1; min-height: 0; height: auto; }
+@media (max-width: 900px) {
+  /* small screens keep the normal page scroll (panel stacks above the chat) */
+  body.chat-mode { overflow: auto; height: auto; display: block; }
+  body.chat-mode .chat-app { height: 82vh; min-height: 520px; }
+}
+
 :root {
   /* palette */
   --bg: #07080f;

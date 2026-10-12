@@ -12,7 +12,7 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); console.log('  done', f.path); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const MSG = 'v3.12.0: clicking a reply quote jumps to the original message (auto-loads older history pages until found, flash-highlight on arrival); scrollbar strips hidden in the chat/stream writing boxes; AI_HANDOFF updated';
+  const MSG = 'grouped-message time now lives under the LAST message of the burst (travels down as new same-minute messages arrive); chat page is app-like: the page itself never scrolls - only the messages area does (mobile keeps normal scroll); custom subtle purple scrollbars site-wide';
   const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);
