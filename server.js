@@ -1147,7 +1147,7 @@ io.on('connection', (socket) => {
         socket.join('stream:' + c);
         io.to('stream:' + c).emit('stream_host', { code: c, hostId: socket.id });
         // restore the host's live viewer list after the reconnect
-        socket.emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
+        socket.emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.entries()].map(([sid, v]) => ({ sid, name: v.name, active: !!v.active })) });
         if (ack) ack({ ok: true, code: c, reAdopted: true });
         log('stream_start', `code=${c} host RECONNECTED (adopted)`, reqLikeS());
         return;
@@ -1157,6 +1157,7 @@ io.on('connection', (socket) => {
         code: c, hostId: socket.id, hostName: String(data?.name || 'anonymous').slice(0, 30),
         pw: data?.pw ? hashPw(String(data.pw)) : null, viewers: new Map(), startedAt: Date.now(),
         chat: [],
+        banned: new Set(), // kicked viewers (by uid) can never rejoin this stream
       };
       streamRole = 'host';
       streamJoined = c;
@@ -1179,8 +1180,14 @@ io.on('connection', (socket) => {
         log('stream_join', `code=${c} FAILED pw`, reqLikeS());
         return ack && ack({ error: 'wrong stream password' });
       }
+      // kicked viewers are banned by their stable uid — they can never rejoin this stream
+      const joinUid = String(data?.uid || '');
+      if (joinUid && s.banned && s.banned.has(joinUid)) {
+        log('stream_join', `code=${c} BLOCKED (kicked) uid=${joinUid}`, reqLikeS());
+        return ack && ack({ error: 'you were removed from this stream' });
+      }
       socket.join('stream:' + c);
-      s.viewers.set(socket.id, { name: String(data?.name || 'anonymous').slice(0, 30), active: true });
+      s.viewers.set(socket.id, { name: String(data?.name || 'anonymous').slice(0, 30), uid: joinUid, active: true });
       streamRole = 'viewer';
       streamJoined = c;
       socket.data.streamCode = c;
@@ -1188,7 +1195,7 @@ io.on('connection', (socket) => {
       // announce the join to the WHOLE room (host + viewers) so voice-mesh peers can learn each other
       io.to('stream:' + c).emit('stream_viewer', { id: socket.id, name: s.viewers.get(socket.id).name, count: s.viewers.size });
       // full viewer list for the host's live panel
-      io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
+      io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.entries()].map(([sid, v]) => ({ sid, name: v.name, active: !!v.active })) });
       socket.emit('stream_chat_history', s.chat || []);
       io.emit('stream_update', { streams: streamListPublic() });
       log('stream_join', `code=${c} name=${data?.name}`, reqLikeS());
@@ -1227,8 +1234,32 @@ io.on('connection', (socket) => {
     const me = s && s.viewers.get(socket.id);
     if (!me) return;
     me.active = !!(data && data.active);
-    io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
+    io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.entries()].map(([sid, v]) => ({ sid, name: v.name, active: !!v.active })) });
     } catch (e) { console.error('[stream watching]', e.message); }
+  });
+
+  /* HOST kicks a viewer: banned by uid (can never rejoin this stream),
+     force-disconnected, and removed from the live list. */
+  socket.on('stream_kick', (data, ack) => {
+    try {
+    if (streamRole !== 'host' || !streamJoined) return ack && ack({ error: 'not hosting' });
+    const s = liveStreams[streamJoined];
+    if (!s || s.hostId !== socket.id) return ack && ack({ error: 'not hosting' });
+    const target = String(data?.target || '');
+    const entry = s.viewers.get(target);
+    if (!entry) return ack && ack({ error: 'viewer not found' });
+    if (entry.uid) s.banned.add(entry.uid);
+    s.viewers.delete(target);
+    const kicked = io.sockets.sockets.get(target);
+    io.to('stream:' + streamJoined).emit('stream_viewer_left', { id: target, count: s.viewers.size });
+    io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.entries()].map(([sid, v]) => ({ sid, name: v.name, active: !!v.active })) });
+    log('stream_kick', `code=${streamJoined} kicked=${entry.name} uid=${entry.uid || 'none'}`, reqLikeS());
+    if (kicked) {
+      kicked.emit('stream_kicked', { code: streamJoined, reason: 'The streamer removed you from this stream.' });
+      setTimeout(() => { try { kicked.disconnect(true); } catch {} }, 300); // let the message flush
+    }
+    if (ack) ack({ ok: true, name: entry.name });
+    } catch (e) { console.error('[stream kick]', e.message); ack && ack({ error: 'failed' }); }
   });
 
   /* stream mini chat: text + images, shared by host and viewers */
@@ -1300,7 +1331,7 @@ io.on('connection', (socket) => {
           // announce to the WHOLE room so voice-mesh peers drop this peer's audio
           io.to('stream:' + streamJoined).emit('stream_viewer_left', { id: socket.id, count: s.viewers.size });
           // refresh the host's live viewer list
-          io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.values()].map(v => ({ name: v.name, active: !!v.active })) });
+          io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name), viewers: [...s.viewers.entries()].map(([sid, v]) => ({ sid, name: v.name, active: !!v.active })) });
           io.emit('stream_update', { streams: streamListPublic() });
         }
       }

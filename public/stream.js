@@ -40,6 +40,12 @@ let STUN = {
   iceCandidatePoolSize: 4,
 };
 
+function myUid() {
+  let u = localStorage.getItem('send_uid');
+  if (!u) { u = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('send_uid', u); }
+  return u;
+}
+
 function genCode() {
   const a = 'abcdefghjkmnpqrstuvwxyz23456789';
   let s = ''; for (let i = 0; i < 6; i++) s += a[Math.floor(Math.random() * a.length)];
@@ -175,18 +181,32 @@ socket.on('stream_viewer_left', ({ count }) => {
 
 /* live viewer list beside the stream: 🟢 green = watching right now (the
    stream tab is visible + focused), ⚪ gray = joined but in another tab/page.
-   Deduped by name — if the same person has two tabs, green wins. */
-socket.on('stream_viewers', ({ viewers }) => {
+   Deduped by name — if the same person has two tabs, green wins.
+   Hovering a row reveals the kick button (bans them from this stream). */
+let viewerSockets = new Map(); // name → socket id (for kicking)
+socket.on('stream_viewers', ({ viewers, names }) => {
+  viewerSockets = new Map();
   const byName = new Map();
   (viewers || []).forEach(v => {
+    viewerSockets.set(v.name, v.sid || v.name);
     const prev = byName.get(v.name);
-    byName.set(v.name, { active: (prev ? prev.active : false) || !!v.active });
+    byName.set(v.name, { active: (prev ? prev.active : false) || !!v.active, sid: v.sid });
   });
   const list = [...byName.entries()];
   $('#viewersListCount').textContent = list.length;
   $('#viewerList').innerHTML = list.length
-    ? list.map(([n, v]) => `<div class="viewer-row" title="${v.active ? 'Watching right now' : 'Joined, but not watching right now'}"><span class="vdot ${v.active ? 'on' : 'off'}"></span><span class="vname">${esc(n)}</span></div>`).join('')
+    ? list.map(([n, v]) => `<div class="viewer-row" title="${v.active ? 'Watching right now' : 'Joined, but not watching right now'}"><span class="vdot ${v.active ? 'on' : 'off'}"></span><span class="vname">${esc(n)}</span><button class="vkick" data-vkick="${esc(v.sid)}" data-vname="${esc(n)}" title="Remove from this stream (banned)">✕</button></div>`).join('')
     : '<div class="small muted">Nobody is watching yet.</div>';
+});
+$('#viewerList').addEventListener('click', e => {
+  const k = e.target.closest('[data-vkick]');
+  if (!k) return;
+  const name = k.dataset.vname;
+  if (!confirm(`Remove ${name} from this stream?\nThey will be banned and cannot rejoin it.`)) return;
+  socket.emit('stream_kick', { target: k.dataset.vkick }, (ack) => {
+    if (ack && ack.ok) toast(`🚫 ${name} was removed`);
+    else toast('⚠ ' + (ack?.error || 'Kick failed'), 'err');
+  });
 });
 
 async function makeHostPc(viewerId) {
@@ -230,7 +250,7 @@ $('#watchModal').addEventListener('click', e => { if (e.target.id === 'watchModa
 $('#watchGo').addEventListener('click', () => {
   const code = $('#watchCode').value.trim().toLowerCase();
   if (!code) { $('#watchErr').textContent = 'Enter a stream code'; return; }
-  socket.emit('stream_join', { code, pw: $('#watchPw').value, name: myName() }, (ack) => {
+  socket.emit('stream_join', { code, pw: $('#watchPw').value, name: myName(), uid: myUid() }, (ack) => {
     if (!ack || ack.error) {
       if (ack?.error === 'wrong stream password') {
         $('#watchPwField').classList.remove('hidden');
@@ -567,6 +587,15 @@ $('#btnHintRestart').addEventListener('click', () => {
   setTimeout(() => $('#hostPw').focus(), 60);
 });
 
+/* kicked by the streamer: banned from this stream — clean up and leave */
+socket.on('stream_kicked', ({ reason }) => {
+  if (role === 'viewer') {
+    cleanupViewer();
+    showGate();
+    toast('🚫 ' + (reason || 'You were removed from this stream.'), 'err');
+  }
+});
+
 socket.on('stream_ended', ({ reason }) => {
   if (role === 'viewer') {
     cleanupViewer();
@@ -594,7 +623,7 @@ function hashTarget() {
   return decodeURIComponent(location.hash.slice(1)).trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
 }
 function autoJoin(code, pw) {
-  socket.emit('stream_join', { code, pw: pw || '', name: myName() }, (ack) => {
+  socket.emit('stream_join', { code, pw: pw || '', name: myName(), uid: myUid() }, (ack) => {
     if (ack && ack.ok) {
       role = 'viewer';
       myCode = ack.code;
@@ -642,7 +671,7 @@ socket.on('connect', () => {
       // if it failed, the stream truly ended → the stream_ended event already handled cleanup
     });
   } else if (role === 'viewer' && myCode) {
-    socket.emit('stream_join', { code: myCode, pw: lastJoinPw, name: myName() }, (ack) => {
+    socket.emit('stream_join', { code: myCode, pw: lastJoinPw, name: myName(), uid: myUid() }, (ack) => {
       if (ack && ack.ok) { hostId = ack.hostId; /* keep watching */ }
       else { cleanupViewer(); showGate(); toast('Stream ended', 'err'); }
     });
