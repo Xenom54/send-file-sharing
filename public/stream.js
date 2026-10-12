@@ -593,6 +593,7 @@ socket.on('stream_kicked', ({ reason }) => {
     cleanupViewer();
     showGate();
     toast('🚫 ' + (reason || 'You were removed from this stream.'), 'err');
+    if (!socket.connected) socket.connect(); // server-forced disconnects suppress auto-reconnect
   }
 });
 
