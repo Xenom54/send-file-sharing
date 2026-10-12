@@ -344,7 +344,9 @@ function send() {
   if (!text || !currentRoom) return;
   const payload = { text };
   if (replyTarget) payload.replyTo = replyTarget.id;
-  socket.emit('msg', payload);
+  socket.emit('msg', payload, (ack) => {
+    if (ack && ack.error) toast('X ' + ack.error, 'err');
+  });
   $('#msgInput').value = '';
   autoGrowInput($('#msgInput')); // reset the box height after sending
   saveDraft(); // sent → clear the saved draft too

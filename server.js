@@ -317,6 +317,42 @@ function isBanned(ip) {
 }
 function normIp(ip) { return String(ip || '').replace(/^::ffff:/, '').trim(); }
 
+/* ============================ MUTES & TIMEOUTS ============================
+   Private admins can mute an entire ROOM temporarily or timeout a specific
+   user (per room). State persists in mutes.json (backed up to MEGA+GitHub). */
+paths.mutes = path.join(DATA_DIR, 'mutes.json');
+const mutes = readJSON(paths.mutes, { rooms: {}, users: {} });
+mutes.rooms = mutes.rooms || {}; mutes.users = mutes.users || {};
+function saveMutes() {
+  writeJSON(paths.mutes, mutes);
+  backupPush('data', 'mutes.json');
+  megaPush('data', 'mutes.json');
+}
+function roomMutedUntil(room) {
+  const until = mutes.rooms[room] || 0;
+  if (until > Date.now()) return until;
+  if (until) { delete mutes.rooms[room]; saveMutes(); } // expired → clean up
+  return 0;
+}
+function userTimedOutUntil(room, uid) {
+  const key = room + '|' + uid;
+  const until = mutes.users[key] || 0;
+  if (until > Date.now()) return until;
+  if (until) { delete mutes.users[key]; saveMutes(); } // expired → clean up
+  return 0;
+}
+function setRoomMute(room, minutes) {
+  mutes.rooms[room] = minutes > 0 ? Date.now() + minutes * 60000 : 0;
+  if (!mutes.rooms[room]) delete mutes.rooms[room];
+  saveMutes();
+}
+function setUserTimeout(room, uid, minutes) {
+  const key = room + '|' + uid;
+  mutes.users[key] = minutes > 0 ? Date.now() + minutes * 60000 : 0;
+  if (!mutes.users[key]) delete mutes.users[key];
+  saveMutes();
+}
+
 /* ban enforcement middleware — runs BEFORE everything else.
    The superadmin panel stays reachable even if the superadmin's own IP gets
    banned accidentally — otherwise bans could never be undone.             */
@@ -1025,7 +1061,7 @@ function panelPw(req) {
 /* rooms a private admin may browse */
 app.get('/api/chat/rooms', (req, res) => {
   if (!requirePrivateAdminPw(panelPw(req))) return res.status(401).json({ error: 'unauthorized' });
-  res.json(Object.keys(chats).map(name => ({ name, count: (chats[name] || []).length })));
+  res.json(Object.keys(chats).map(name => ({ name, count: (chats[name] || []).length, mutedUntil: roomMutedUntil(name) || 0 })));
 });
 
 /* private admin login check (for the hidden /privateadmin page) */
@@ -1088,6 +1124,31 @@ app.get('/api/chat/rooms/:room/visitors', (req, res) => {
   });
 });
 
+/* private admin: room mute / unmute / user timeout */
+app.post('/api/chat/rooms/:room/mute', (req, res) => {
+  if (!requirePrivateAdminPw(req.body?.pw)) return res.status(401).json({ error: 'unauthorized' });
+  const room = roomName(req.params.room);
+  const minutes = Number(req.body?.minutes) || 0;
+  if (!room) return res.status(400).json({ error: 'invalid room' });
+  setRoomMute(room, minutes);
+  log('room_mute', `room=${room} ${minutes > 0 ? minutes + ' min' : 'unmuted'}`, req);
+  res.json({ ok: true, mutedUntil: roomMutedUntil(room) });
+});
+app.post('/api/chat/rooms/:room/timeout', (req, res) => {
+  if (!requirePrivateAdminPw(req.body?.pw)) return res.status(401).json({ error: 'unauthorized' });
+  const room = roomName(req.params.room);
+  const uid = String(req.body?.uid || '');
+  const minutes = Number(req.body?.minutes) || 0;
+  if (!room || !uid) return res.status(400).json({ error: 'room and uid required' });
+  setUserTimeout(room, uid, minutes);
+  log('user_timeout', `room=${room} uid=${uid} ${minutes > 0 ? minutes + ' min' : 'removed'}`, req);
+  // tell the timed-out user right away (if online in that room)
+  for (const [, s] of io.sockets.sockets) {
+    if (s.data.room === room && s.data.uid === uid) s.emit('msg_rejected', { reason: 'user-timeout', until: userTimedOutUntil(room, uid), text: minutes > 0 ? 'You are timed out in this room for ' + minutes + ' minutes' : 'Your timeout was removed' });
+  }
+  res.json({ ok: true });
+});
+
 /* create a room as its owner (returns a one-time owner token) */
 app.post('/api/chat/rooms/:room', (req, res) => {
   const room = roomName(req.params.room);
@@ -1136,7 +1197,7 @@ app.delete('/api/chat/rooms/:room/mine', (req, res) => {
 const presence = {};
 function roomPresence(room) {
   const list = [];
-  for (const [, u] of presence[room] || []) list.push({ name: u.name, admin: !!u.admin, since: u.since });
+  for (const [, u] of presence[room] || []) list.push({ name: u.name, uid: u.uid, admin: !!u.admin, since: u.since });
   return list;
 }
 /* push the online list to every private-admin socket in the room */
@@ -1531,6 +1592,17 @@ io.on('connection', (socket) => {
     const cf = String(data?.cfile || '').slice(0, 2000);
     // a message must carry SOMETHING: text, image, voice note, or a file
     if (!t.trim() && !img && !aud && !cf) return;
+    // mute / timeout enforcement (private admins are exempt)
+    const mutedUntil = roomMutedUntil(room);
+    if (mutedUntil && !isPrivateAdmin) {
+      socket.emit('msg_rejected', { reason: 'room-muted', until: mutedUntil, text: 'This room is muted until ' + new Date(mutedUntil).toLocaleString() });
+      return;
+    }
+    const timedOutUntil = userTimedOutUntil(room, socket.data.uid || '');
+    if (timedOutUntil && !isPrivateAdmin) {
+      socket.emit('msg_rejected', { reason: 'user-timeout', until: timedOutUntil, text: 'You are timed out in this room until ' + new Date(timedOutUntil).toLocaleString() });
+      return;
+    }
     const msg = { ts: Date.now(), name, text: t, id: newId(), uid: socket.data.uid };
     if (img) msg.image = img;
     if (aud) { msg.audio = aud; msg.fname = String(data?.fname || 'voice').slice(0, 120); msg.fsize = Number(data?.fsize) || 0; }

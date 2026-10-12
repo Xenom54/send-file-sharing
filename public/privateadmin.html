@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Private Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=37">
+  <link rel="stylesheet" href="/static/style.css?v=38">
 </head>
 <body>
   <nav class="navbar">
@@ -58,7 +58,22 @@
         <h1 id="viewTitle" style="font-size:1.5rem">#room</h1>
         <p class="small muted"><span id="viewOnline">0 online</span> · <span id="viewMsgs">0 messages</span></p>
       </div>
-      <button class="btn small danger" id="btnDeleteRoom">🗑 Delete room</button>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="muteMins" style="padding:6px 8px;border-radius:8px;background:rgba(3,4,10,.7);border:1px solid var(--border-2);color:var(--text);font-size:.8rem">
+            <option value="10">10 min</option>
+            <option value="60">1 hour</option>
+            <option value="1440">1 day</option>
+            <option value="10080">1 week</option>
+            <option value="custom">Custom…</option>
+          </select>
+          <input type="number" id="muteCustom" min="1" placeholder="min" class="hidden" style="width:70px;padding:6px 8px;border-radius:8px;background:rgba(3,4,10,.7);border:1px solid var(--border-2);color:var(--text)">
+          <button class="btn small danger" id="btnMuteRoom">🔇 Mute room</button>
+          <button class="btn small hidden" id="btnUnmuteRoom">🔊 Unmute</button>
+        </div>
+        <div class="small hidden" id="mutedBadge" style="color:#fbbf24;font-weight:700"></div>
+      </div>
+            <button class="btn small danger" id="btnDeleteRoom">🗑 Delete room</button>
     </div>
 
     <div class="chat-app" style="height:64vh;min-height:440px">
@@ -95,7 +110,7 @@
     <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div></footer>
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/privateadmin.js?v=37"></script>
-  <script src="/static/bidi.js?v=37"></script>
+  <script src="/static/privateadmin.js?v=38"></script>
+  <script src="/static/bidi.js?v=38"></script>
 </body>
 </html>

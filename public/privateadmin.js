@@ -125,6 +125,7 @@ async function loadVisitors(room) {
     const d = await r.json();
     renderOnline(d.online || []);
     renderVisitors(d.visitors || []);
+    loadMuteState();
   } catch { /* ignore */ }
 }
 
@@ -139,8 +140,65 @@ function renderOnline(list) {
   });
   $('#onlineCount').textContent = unique.length;
   $('#onlineList').innerHTML = unique.length ? unique.map(u =>
-    `<div class="member-row"><span class="dot on"></span>${esc(u.name)}${u.admin ? ' 🛡️' : ''}<span class="mr-ago">${esc(ago(u.since))}</span></div>`
+    `<div class="member-row"><span class="dot on"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(u.name)}${u.admin ? ' 🛡️' : ''}</span><button class="btn small" data-timeout="${esc(u.uid || '')}" data-name="${esc(u.name)}" title="Timeout this user" style="opacity:.7">⏳</button></div>`
   ).join('') : '<div class="small muted">Nobody online.</div>';
+}
+
+/* room mute controls */
+let currentMutedUntil = 0;
+function refreshMuteUI() {
+  const muted = currentMutedUntil > Date.now();
+  $('#btnMuteRoom').classList.toggle('hidden', muted);
+  $('#btnUnmuteRoom').classList.toggle('hidden', !muted);
+  const badge = $('#mutedBadge');
+  badge.classList.toggle('hidden', !muted);
+  if (muted) {
+    const left = Math.ceil((currentMutedUntil - Date.now()) / 60000);
+    badge.textContent = '🔇 Room muted - ' + (left >= 60 ? Math.floor(left / 60) + 'h ' + (left % 60) + 'm' : left + 'm') + ' remaining';
+  }
+}
+$('#muteMins').addEventListener('change', () => $('#muteCustom').classList.toggle('hidden', $('#muteMins').value !== 'custom'));
+$('#btnMuteRoom').addEventListener('click', async () => {
+  let mins = $('#muteMins').value === 'custom' ? Number($('#muteCustom').value) || 0 : Number($('#muteMins').value);
+  if (!mins) return toast('⚠ Enter the duration', 'err');
+  const r = await fetch('/api/chat/rooms/' + encodeURIComponent(currentRoom) + '/mute', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pw, minutes: mins }),
+  });
+  const d = await r.json();
+  if (r.ok) { currentMutedUntil = d.mutedUntil; refreshMuteUI(); toast('🔇 Room muted for ' + mins + ' minutes'); }
+  else toast('⚠ ' + (d.error || 'Failed'), 'err');
+});
+$('#btnUnmuteRoom').addEventListener('click', async () => {
+  const r = await fetch('/api/chat/rooms/' + encodeURIComponent(currentRoom) + '/mute', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pw, minutes: 0 }),
+  });
+  if (r.ok) { currentMutedUntil = 0; refreshMuteUI(); toast('🔊 Room unmuted'); }
+  else toast('⚠ Failed', 'err');
+});
+async function loadMuteState() {
+  try {
+    const rooms = await (await fetch('/api/chat/rooms', { headers: { 'x-pw': pw } })).json();
+    const r = (rooms || []).find(x => x.name === currentRoom);
+    currentMutedUntil = r ? (r.mutedUntil || 0) : 0;
+    refreshMuteUI();
+  } catch {}
+}
+
+/* per-user timeout */
+function timeoutUser(uid, name) {
+  const mins = prompt('Timeout ' + name + ' for how many minutes? (empty = remove their timeout)');
+  if (mins === null) return;
+  const m = Number(mins);
+  if (mins.trim() && (!m || m < 1)) return toast('⚠ Enter a valid number of minutes', 'err');
+  fetch('/api/chat/rooms/' + encodeURIComponent(currentRoom) + '/timeout', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pw, uid, minutes: mins.trim() ? m : 0 }),
+  }).then(r => r.json()).then(d => {
+    if (d.ok) toast(mins.trim() ? '⏳ ' + name + ' timed out for ' + m + ' minutes' : '✓ Timeout removed for ' + name);
+    else toast('⚠ ' + (d.error || 'Failed'), 'err');
+  }).catch(() => toast('⚠ Failed', 'err'));
 }
 
 function renderVisitors(list) {
@@ -225,6 +283,11 @@ socket.on('delmsg', ({ id }) => {
   const el = $('#viewMessages').querySelector(`[data-mid="${CSS.escape(id)}"]`);
   if (el) el.remove();
 });
+$('#onlineList').addEventListener('click', e => {
+  const t = e.target.closest('[data-timeout]');
+  if (t && t.dataset.timeout) timeoutUser(t.dataset.timeout, t.dataset.name);
+});
+
 socket.on('presence', ({ room, online }) => {
   if (room === currentRoom) renderOnline(online || []);
 });
