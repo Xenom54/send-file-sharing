@@ -282,28 +282,132 @@ app.use('/static', express.static(path.join(__dirname, 'public'), {
 // cookie'd browsers are tracked by `send_vid`; cookie-less clients (bots/monitors/APIs) by IP+UA.
 const VISIT_WINDOW = 30 * 60 * 1000;
 const visitSessions = new Map();
+
+/* ============================ IP BANS (superadmin) ============================
+   /superadmin (password = admin123 by default, changeable from /admin) can ban
+   any IP temporarily (minutes/hours/days) or permanently. Banned IPs are
+   rejected on EVERY route and socket connection. Persisted to bans.json and
+   backed up to MEGA + GitHub.                                              */
+paths.bans = path.join(DATA_DIR, 'bans.json');
+const SUPERADMIN_PASSWORD_DEFAULT = 'admin123';
+let SUPERADMIN_PASSWORD = process.env.SUPERADMIN_PASSWORD
+  || (readJSON(path.join(DATA_DIR, 'superadmin.json'), null) || {}).password
+  || SUPERADMIN_PASSWORD_DEFAULT;
+function setSuperadminPassword(pw) {
+  SUPERADMIN_PASSWORD = pw;
+  writeJSON(path.join(DATA_DIR, 'superadmin.json'), { password: pw });
+  backupPush('data', 'superadmin.json');
+  megaPush('data', 'superadmin.json');
+}
+const bans = readJSON(paths.bans, {}); // ip → { reason, until (0 = permanent), by, at }
+function saveBans() {
+  writeJSON(paths.bans, bans);
+  backupPush('data', 'bans.json');
+  megaPush('data', 'bans.json');
+}
+function banActive(entry) {
+  if (!entry) return false;
+  return !entry.until || entry.until > Date.now(); // until 0 = permanent
+}
+function isBanned(ip) {
+  const e = bans[ip];
+  if (banActive(e)) return e;
+  if (e) delete bans[ip]; // expired → clean up lazily
+  return null;
+}
+function normIp(ip) { return String(ip || '').replace(/^::ffff:/, '').trim(); }
+
+/* ban enforcement middleware — runs BEFORE everything else.
+   The superadmin panel stays reachable even if the superadmin's own IP gets
+   banned accidentally — otherwise bans could never be undone.             */
 app.use((req, res, next) => {
-  const skip = req.path.startsWith('/socket.io') || req.path.startsWith('/static') || req.path.startsWith('/api/health');
-  if (!skip) {
-    const now = Date.now();
-    const hasVid = req.cookies && req.cookies.send_vid;
-    const ipUa = (req.ip || 'x') + '|' + String(req.headers['user-agent'] || '').slice(0, 60);
-    const key = hasVid || ipUa;
-    const last = visitSessions.get(key) || 0;
-    if (now - last >= VISIT_WINDOW) {
-      visitSessions.set(key, now);
-      if (visitSessions.size > 5000) visitSessions.delete(visitSessions.keys().next().value);
-      log('visit', `${req.method} ${req.path} · session start`, req);
-    }
-    if (!hasVid) {
-      // hand out a visitor cookie + seed its window so the follow-up
-      // cookie'd request doesn't count as a second session
-      const newVid = 'v' + newId();
-      try { res.append('Set-Cookie', `send_vid=${newVid}; Max-Age=31536000; Path=/; SameSite=Lax`); } catch {}
-      visitSessions.set(newVid, now);
-    }
+  if (req.path.startsWith('/superadmin') || req.path.startsWith('/api/superadmin')) return next();
+  const hit = isBanned(normIp(req.ip));
+  if (hit) {
+    const untilTxt = hit.until ? new Date(hit.until).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'permanently';
+    return res.status(403).send(`🚫 Your IP has been banned (${untilTxt}). Reason: ${hit.reason || 'no reason given'}`);
   }
   next();
+});
+
+/* enforce bans on socket connections too — io is defined later in this file,
+   so the hook is registered right after io is created (see below) */
+const socketBanHook = (socket, next) => {
+  const ip = normIp(socket.handshake.address);
+  const hit = isBanned(ip);
+  if (hit) return next(new Error('banned'));
+  next();
+};
+
+/* superadmin page + API */
+app.get('/superadmin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'superadmin.html')));
+
+app.post('/api/superadmin/login', (req, res) => {
+  if (panelLoginBlocked(req, res)) return;
+  const pw = String(req.body?.pw || '');
+  if (!safeEq(pw, SUPERADMIN_PASSWORD)) { log('superadmin_login', 'failed', req); recordFail(req); return res.status(401).json({ error: 'wrong password' }); }
+  clearFails(req);
+  log('superadmin_login', 'success', req);
+  res.json({ ok: true });
+});
+
+/* all /api/superadmin/* data routes read the password from the x-pw header */
+function requireSuperadmin(req, res, next) {
+  if (safeEq(panelPw(req), SUPERADMIN_PASSWORD) && SUPERADMIN_PASSWORD) return next();
+  res.status(401).json({ error: 'unauthorized' });
+}
+
+app.get('/api/superadmin/bans', requireSuperadmin, (req, res) => {
+  const now = Date.now();
+  const list = Object.entries(bans)
+    .filter(([, e]) => banActive(e))
+    .map(([ip, e]) => ({ ip, reason: e.reason || '', until: e.until || 0, permanent: !e.until, by: e.by || '', at: e.at || 0, remaining: e.until ? Math.max(0, e.until - now) : 0 }))
+    .sort((a, b) => (b.at || 0) - (a.at || 0));
+  res.json(list);
+});
+
+app.post('/api/superadmin/bans', requireSuperadmin, (req, res) => {
+  const ip = normIp(req.body?.ip);
+  if (!ip) return res.status(400).json({ error: 'IP required' });
+  const minutes = Number(req.body?.minutes) || 0; // 0 = permanent
+  const reason = String(req.body?.reason || '').slice(0, 200);
+  const until = minutes > 0 ? Date.now() + minutes * 60000 : 0;
+  bans[ip] = { reason, until, by: 'superadmin', at: Date.now() };
+  saveBans();
+  log('ban', `ip=${ip} ${minutes > 0 ? minutes + ' min' : 'PERMANENT'} reason=${reason}`, req);
+  // drop every existing socket from that IP immediately
+  for (const [, s] of io.sockets.sockets) {
+    if (normIp(s.handshake.address) === ip) { s.emit('banned', { reason, untilTxt: minutes > 0 ? minutes + ' minutes' : 'permanently' }); setTimeout(() => { try { s.disconnect(true); } catch {} }, 250); }
+  }
+  res.json({ ok: true, ip, until, permanent: minutes <= 0 });
+});
+
+app.post('/api/superadmin/unban', requireSuperadmin, (req, res) => {
+  const ip = normIp(req.body?.ip);
+  if (!ip || !bans[ip]) return res.status(404).json({ error: 'no ban for that IP' });
+  delete bans[ip];
+  saveBans();
+  log('unban', `ip=${ip}`, req);
+  res.json({ ok: true, ip });
+});
+
+app.get('/api/superadmin/ips', requireSuperadmin, (req, res) => {
+  // the recent visitor IPs (from the activity log) to make banning easy
+  const seen = new Map();
+  for (const l of logs) {
+    if (!l.ip) continue;
+    const prev = seen.get(l.ip);
+    if (!prev || l.ts > prev) seen.set(l.ip, l.ts);
+  }
+  res.json([...seen.entries()].map(([ip, last]) => ({ ip, last, banned: !!banActive(bans[ip]) })).sort((a, b) => b.last - a.last).slice(0, 100));
+});
+
+app.post('/api/admin/superadmin-password', requireAdmin, (req, res) => {
+  const pw = String(req.body?.password || '');
+  if (pw.length < 4) return res.status(400).json({ error: 'too short (min 4)' });
+  setSuperadminPassword(pw);
+  log('superadmin_pw_change', 'superadmin password changed', req);
+  res.json({ ok: true });
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -908,6 +1012,7 @@ server.keepAliveTimeout = 0;
 /* tolerant heartbeat: Render's free tier briefly freezes/throttles the CPU —
    with a 60s pong window a 30-40s freeze no longer drops everyone's socket */
 const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024, pingInterval: 25000, pingTimeout: 60000 });
+io.use(socketBanHook);
 
 function roomName(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40); }
 

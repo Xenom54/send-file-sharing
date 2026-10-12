@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07080f">
+  <title>Send — Super Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <link rel="stylesheet" href="/static/style.css?v=37">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="brand" href="/"><span class="logo">🛡️</span><span class="name">Send</span></a>
+      <div class="nav-links">
+        <a href="/admin">Admin</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="card admin-login" id="loginCard">
+    <div class="lock-ic">🛡️</div>
+    <h2>Super admin</h2>
+    <div class="sub">Ban IPs temporarily or permanently. Banned IPs are blocked from the entire site.</div>
+    <div class="field">
+      <label class="fl">Password</label>
+      <input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn primary" id="btnLogin" style="width:100%">Log in →</button>
+  </div>
+
+  <div class="wrap hidden" id="dash">
+    <div class="hero">
+      <div style="flex:1">
+        <h1>🛡️ Super admin</h1>
+        <p>IP bans — temporary or permanent. Banned IPs see a 403 on every page and are cut from all sockets.</p>
+      </div>
+      <button class="btn small" id="btnRefresh">↻ Refresh</button>
+      <button class="btn small ghost" id="btnLogout">Log out</button>
+    </div>
+
+    <div class="split-grid">
+      <div class="card pane-card">
+        <div class="pane-head"><span class="pane-ic">🚫</span> Ban an IP</div>
+        <div class="field">
+          <label class="fl">IP address</label>
+          <input type="text" id="banIp" placeholder="e.g. 203.0.113.42" dir="ltr">
+        </div>
+        <div class="field">
+          <label class="fl">Duration</label>
+          <select id="banDuration">
+            <option value="10">10 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="1440">1 day</option>
+            <option value="10080">1 week</option>
+            <option value="0" selected>Permanent</option>
+            <option value="custom">Custom (minutes)…</option>
+          </select>
+        </div>
+        <div class="field hidden" id="customDurField">
+          <label class="fl">Custom duration (minutes)</label>
+          <input type="number" id="banCustomMin" min="1" placeholder="e.g. 45">
+        </div>
+        <div class="field">
+          <label class="fl">Reason (optional)</label>
+          <input type="text" id="banReason" placeholder="e.g. spam / abuse" maxlength="200" dir="auto">
+        </div>
+        <button class="btn danger" id="btnBan" style="width:100%">🚫 Ban this IP</button>
+      </div>
+
+      <div class="card pane-card">
+        <div class="pane-head"><span class="pane-ic">🌐</span> Recent visitor IPs <span class="spacer"></span><span class="small muted">click to fill</span></div>
+        <div class="pane-list" id="recentIps"></div>
+      </div>
+    </div>
+
+    <div class="card pane-card" style="margin-top:18px">
+      <div class="pane-head"><span class="pane-ic">📋</span> Active bans <span class="pill" id="banCount">0</span></div>
+      <div class="card tablewrap">
+        <table class="logtable">
+          <thead><tr><th>IP</th><th>Type</th><th>Expires</th><th>Reason</th><th>Banned</th><th></th></tr></thead>
+          <tbody id="bansBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer" style="margin-top:40px">
+    <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div>
+  </footer>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="/static/superadmin.js?v=37"></script>
+</body>
+</html>

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Admin</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=35">
+  <link rel="stylesheet" href="/static/style.css?v=37">
 </head>
 <body>
   <nav class="navbar">
@@ -15,6 +15,7 @@
       <div class="nav-links">
         <a href="/">Site</a>
         <a href="/admin" class="active">Admin</a>
+       <a href="/superadmin">🛡️ Super</a>
       </div>
     </div>
   </nav>
@@ -176,6 +177,15 @@
           <p class="small muted mt">Used for the hidden <code>/privateadmin</code> chat moderation panel.</p>
         </div>
         <div class="card pane-card">
+          <div class="pane-head"><span class="pane-ic">🛡️</span> Super-admin password</div>
+          <div class="field">
+            <label class="fl">New super-admin password</label>
+            <input type="password" id="newSuperadminPw" placeholder="At least 4 characters" autocomplete="new-password">
+          </div>
+          <button class="btn primary" id="btnChangeSuperadminPw">Update password</button>
+          <p class="small muted mt">Used for the hidden <code>/superadmin</code> IP-ban panel.</p>
+        </div>
+        <div class="card pane-card">
           <div class="pane-head"><span class="pane-ic">📡</span> Stream-admin password</div>
           <div class="field">
             <label class="fl">New stream-admin password</label>
@@ -211,7 +221,7 @@
   <footer class="footer" style="margin-top:40px">
     <div class="logo-sm">Send · <span class="crown">With the code of Qai9rr</span></div></footer>
   <div class="toasts" id="toasts"></div>
-  <script src="/static/admin.js?v=35"></script>
-  <script src="/static/bidi.js?v=35"></script>
+  <script src="/static/admin.js?v=37"></script>
+  <script src="/static/bidi.js?v=37"></script>
 </body>
 </html>
