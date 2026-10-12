@@ -658,7 +658,7 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 /* chat voice button while recording */
 #btnVoice.recording { background: rgba(251, 113, 133, .16); border-color: rgba(251, 113, 133, .55); animation: recpulse 1.2s infinite; }
 @keyframes recpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(251, 113, 133, .35); } 50% { box-shadow: 0 0 0 7px rgba(251, 113, 133, 0); } }
-.msg .msg-text { word-break: break-word; }
+.msg .msg-text { word-break: break-word; unicode-bidi: plaintext; }
 .msg.mine .msg-del { left: -7px; right: auto; }
 .admin-msg .who { color: #c4b5fd; }
 
