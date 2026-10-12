@@ -260,7 +260,8 @@ function joinRoom(code, opts = {}) {
   $('#msgInput').placeholder = isKali ? 'Talk to Kali… (Shift+Enter = new line)' : 'Type a message… (@kali to summon · Shift+Enter = new line)';
   $('#membersPanel').classList.toggle('hidden', !iAmAdmin);
   const pw = sessionStorage.getItem('send_privateadmin_pw') || '';
-  socket.emit('join', { room: code, name, uid: store.uid, pw }, (ack) => {
+  // rejoin flag: automatic silent rejoins never announce "joined" to the room
+  socket.emit('join', { room: code, name, uid: store.uid, pw, rejoin: silent }, (ack) => {
     addRoom(code);
     clearUnread(code);
     renderRoomList();
@@ -320,12 +321,20 @@ $('#adminConfirm').addEventListener('click', async () => {
   btn.disabled = false; btn.textContent = 'Unlock';
 });
 
-/* live presence updates (only the server sends these to admin sockets) */
+/* live presence updates (only the server sends these to admin sockets).
+   Deduped by uid — a flaky connection can briefly hold stale socket entries. */
 socket.on('presence', ({ room, online }) => {
   if (!iAmAdmin || room !== currentRoom) return;
-  $('#membersCount').textContent = (online || []).length;
-  $('#membersList').innerHTML = (online || []).length
-    ? online.map(u => `<div class="member-row"><span class="dot on"></span>${esc(u.name)}${u.admin ? ' 🛡️' : ''}</div>`).join('')
+  const seen = new Set();
+  const unique = (online || []).filter(u => {
+    const k = u.uid || u.name;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  $('#membersCount').textContent = unique.length;
+  $('#membersList').innerHTML = unique.length
+    ? unique.map(u => `<div class="member-row"><span class="dot on"></span>${esc(u.name)}${u.admin ? ' 🛡️' : ''}</div>`).join('')
     : '<div class="small muted">Nobody else online.</div>';
 });
 

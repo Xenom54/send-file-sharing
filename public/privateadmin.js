@@ -129,8 +129,16 @@ async function loadVisitors(room) {
 }
 
 function renderOnline(list) {
-  $('#onlineCount').textContent = list.length;
-  $('#onlineList').innerHTML = list.length ? list.map(u =>
+  // dedupe by uid — stale sockets from reconnects can briefly double-list a person
+  const seen = new Set();
+  const unique = (list || []).filter(u => {
+    const k = u.uid || u.name;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  $('#onlineCount').textContent = unique.length;
+  $('#onlineList').innerHTML = unique.length ? unique.map(u =>
     `<div class="member-row"><span class="dot on"></span>${esc(u.name)}${u.admin ? ' 🛡️' : ''}<span class="mr-ago">${esc(ago(u.since))}</span></div>`
   ).join('') : '<div class="small muted">Nobody online.</div>';
 }

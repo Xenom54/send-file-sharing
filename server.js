@@ -1276,6 +1276,7 @@ io.on('connection', (socket) => {
    - "left" broadcasts are delayed 20s and cancelled if they come back
    - a rejoin within the window broadcasts NO "joined" message either        */
 const pendingLeave = new Map(); // `uid|room` → { timer, room, name }
+const recentlyLeft = new Map(); // `uid|room` → ts (a "left" was actually broadcast)
 
 io.on('connection', (socket) => {
   let room = null, name = 'anonymous', isPrivateAdmin = false;
@@ -1306,8 +1307,13 @@ io.on('connection', (socket) => {
       pendingLeave.delete(leaveKey);
     }
 
-    // presence + visitor history
+    // presence + visitor history.
+    // DEDUPE: remove every stale presence entry for this uid (old sockets from
+    // reconnects lingered up to 20 s and made the same person appear 2-6 times)
     if (!presence[room]) presence[room] = new Map();
+    for (const [sid, info] of [...presence[room]]) {
+      if (info.uid === uid && sid !== socket.id) presence[room].delete(sid);
+    }
     presence[room].set(socket.id, { name, uid, admin: isPrivateAdmin, since: Date.now() });
     recordVisit(room, name, uid, isPrivateAdmin, socket.handshake.address);
     emitPresenceToAdmins(room);
@@ -1317,8 +1323,17 @@ io.on('connection', (socket) => {
     socket.emit('role', { admin: isPrivateAdmin, owner: !!roomOwners[room] });
     // private admins enter privately everywhere except the public chat
     const stealth = isPrivateAdmin && room !== 'public';
-    if (!stealth && !wasQuickReconnect) io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
-    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}${wasQuickReconnect ? ' (reconnect)' : ''}`, reqLike());
+    /* join-announcement rules (the phantom leave/join fix):
+       - silent auto-rejoins (client flag) stay quiet…
+       - …UNLESS a "left" message was already broadcast for them (long blip),
+         in which case we announce the return so the room stays consistent   */
+    const rejoinedSilently = !!data?.rejoin;
+    const announcedLeaveRecently = (Date.now() - (recentlyLeft.get(leaveKey) || 0)) < 10 * 60e3;
+    if (recentlyLeft.has(leaveKey)) recentlyLeft.delete(leaveKey);
+    if (!stealth && (!rejoinedSilently || announcedLeaveRecently)) {
+      io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
+    }
+    log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}${wasQuickReconnect ? ' (reconnect)' : ''}${rejoinedSilently ? ' (silent)' : ''}`, reqLike());
     if (ack) ack({ ok: true, admin: isPrivateAdmin });
     } catch (e) { console.error('[io join]', e.message); }
   });
@@ -1421,7 +1436,10 @@ io.on('connection', (socket) => {
         pendingLeave.delete(key);
         if (presence[room]) presence[room].delete(socket.id);
         emitPresenceToAdmins(room);
-        if (!stealth) io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
+        if (!stealth) {
+          recentlyLeft.set(key, Date.now()); // the return will be announced
+          io.to(room).emit('system', { ts: Date.now(), text: `${name} left the room`, kind: 'leave' });
+        }
       }, 20000);
       pendingLeave.set(key, { timer: t, room });
     }
