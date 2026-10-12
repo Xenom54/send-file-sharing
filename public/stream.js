@@ -160,6 +160,21 @@ socket.on('stream_viewer_left', ({ count }) => {
   $('#viewerCount').textContent = count + (count === 1 ? ' viewer' : ' viewers');
 });
 
+/* live viewer list beside the stream (deduped by name — the same person on
+   two tabs would otherwise appear twice) */
+socket.on('stream_viewers', ({ names }) => {
+  const seen = new Set();
+  const unique = (names || []).filter(n => {
+    if (seen.has(n)) return false;
+    seen.add(n);
+    return true;
+  });
+  $('#viewersListCount').textContent = unique.length;
+  $('#viewerList').innerHTML = unique.length
+    ? unique.map(n => `<div class="viewer-row"><span class="vdot"></span><span class="vname">${esc(n)}</span></div>`).join('')
+    : '<div class="small muted">Nobody is watching yet.</div>';
+});
+
 async function makeHostPc(viewerId) {
   if (viewerPcs.has(viewerId)) return viewerPcs.get(viewerId);
   const pc = new RTCPeerConnection(STUN);

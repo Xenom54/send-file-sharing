@@ -806,6 +806,11 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
   width: 320px; flex: none; padding: 14px; display: flex; flex-direction: column;
   max-height: 76vh;
 }
+.viewer-list { display: flex; flex-direction: column; gap: 5px; max-height: 140px; overflow-y: auto; scrollbar-width: none; margin-bottom: 4px; }
+.viewer-list::-webkit-scrollbar { display: none; }
+.viewer-row { padding: 5px 9px; background: rgba(3, 4, 10, .5); border: 1px solid var(--border); border-radius: 8px; font-size: .8rem; display: flex; align-items: center; gap: 7px; }
+.viewer-row .vdot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex: none; box-shadow: 0 0 6px rgba(52, 211, 153, .6); }
+.viewer-row .vname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stream-chat .ph { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; color: var(--text-3); margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
 .sc-messages { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px; min-height: 160px; }
 .sc-msg {

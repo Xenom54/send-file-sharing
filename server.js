@@ -1146,6 +1146,8 @@ io.on('connection', (socket) => {
         socket.data.streamName = s.hostName;
         socket.join('stream:' + c);
         io.to('stream:' + c).emit('stream_host', { code: c, hostId: socket.id });
+        // restore the host's live viewer list after the reconnect
+        socket.emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name) });
         if (ack) ack({ ok: true, code: c, reAdopted: true });
         log('stream_start', `code=${c} host RECONNECTED (adopted)`, reqLikeS());
         return;
@@ -1185,6 +1187,8 @@ io.on('connection', (socket) => {
       socket.data.streamName = s.viewers.get(socket.id).name;
       // announce the join to the WHOLE room (host + viewers) so voice-mesh peers can learn each other
       io.to('stream:' + c).emit('stream_viewer', { id: socket.id, name: s.viewers.get(socket.id).name, count: s.viewers.size });
+      // full viewer list for the host's live panel
+      io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name) });
       socket.emit('stream_chat_history', s.chat || []);
       io.emit('stream_update', { streams: streamListPublic() });
       log('stream_join', `code=${c} name=${data?.name}`, reqLikeS());
@@ -1281,6 +1285,8 @@ io.on('connection', (socket) => {
           s.viewers.delete(socket.id);
           // announce to the WHOLE room so voice-mesh peers drop this peer's audio
           io.to('stream:' + streamJoined).emit('stream_viewer_left', { id: socket.id, count: s.viewers.size });
+          // refresh the host's live viewer list
+          io.to(s.hostId).emit('stream_viewers', { names: [...s.viewers.values()].map(v => v.name) });
           io.emit('stream_update', { streams: streamListPublic() });
         }
       }
