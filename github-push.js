@@ -12,7 +12,7 @@ function collect(dir, base = '') { const out = []; for (const name of fs.readdir
   for (const f of files) { const blob = await api(`/repos/${OWNER}/${REPO}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: fs.readFileSync(f.full).toString('base64'), encoding: 'base64' }) }); tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha }); console.log('  done', f.path); }
   const head = await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`);
   const treeRes = await api(`/repos/${OWNER}/${REPO}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: head.object.sha, tree }) });
-  const MSG = 'admin recycle bin: DELETE ALL button - one click permanently destroys every item in the bin (uploaded files removed from disk + MEGA/GitHub backups), double-confirmed; verified 29 items purged, bin emptied, files gone';
+  const MSG = 'STREAM QUALITY + LATENCY: 1080p-class capture at 60fps (was 30), 12 Mbps video bitrate with maxFramerate locked at 60, balanced degradation (keeps BOTH fps and sharpness), playoutDelayHint=0 on every receiver (kills the jitter-buffer delay in Chrome), free OpenRelay TURN added so streams connect behind strict NATs, ICE candidate pool for faster setup';
   const commit = await api(`/repos/${OWNER}/${REPO}/git/commits`, { method: 'POST', body: JSON.stringify({ message: MSG, tree: treeRes.sha, parents: [head.object.sha] }) });
   await api(`/repos/${OWNER}/${REPO}/git/refs/heads/main`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha }) });
   console.log('pushed:', commit.sha);

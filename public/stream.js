@@ -27,7 +27,18 @@ let viewerPc = null;             // viewer side: single PC to the host
 let hostId = null;
 let lastJoinPw = '';  // viewer: remember the stream password for silent rejoins
 let lastHostPw = '';  // host: remember for re-adopting after a reconnect
-let STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+/* ICE: Google STUN for direct paths + free OpenRelay TURN so streams connect
+   even behind strict NATs (TURN is only used when direct P2P fails) */
+let STUN = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
+  iceCandidatePoolSize: 4,
+};
 
 function genCode() {
   const a = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -71,9 +82,13 @@ $('#hostGo').addEventListener('click', async () => {
   const btn = $('#hostGo');
   btn.disabled = true; btn.textContent = 'Starting…';
   try {
-    // quality: full-frame-rate capture, ideal for screen content
+    // quality: 1080p-class capture at 60 fps (acceptance: at least 720p60)
     localStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30, max: 60 } },
+      video: {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 60, min: 30, max: 60 },
+      },
       audio: true,
     });
     // tell WebRTC this is screen content → encoder prioritizes sharpness
@@ -150,15 +165,16 @@ async function makeHostPc(viewerId) {
   const pc = new RTCPeerConnection(STUN);
   viewerPcs.set(viewerId, pc);
   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-  // quality: high bitrate for sharp screen content, never downscale the capture
+  // quality: 12 Mbps headroom for 1080p60 motion, never downscale the capture
   try {
     const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
     if (sender) {
       const params = sender.getParameters();
       if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-      params.encodings[0].maxBitrate = 8 * 1024 * 1024;   // 8 Mbps — crisp text & detail
-      params.encodings[0].scaleResolutionDownBy = 1;      // keep full resolution
-      params.degradationPreference = 'maintain-resolution'; // prefer sharpness over fps
+      params.encodings[0].maxBitrate = 12 * 1024 * 1024;    // 12 Mbps — crisp 1080p60
+      params.encodings[0].maxFramerate = 60;                // lock 60 fps
+      params.encodings[0].scaleResolutionDownBy = 1;        // keep full resolution
+      params.degradationPreference = 'balanced';            // keep BOTH fps and sharpness
       await sender.setParameters(params);
     }
   } catch { /* older browsers: defaults still work */ }
@@ -233,6 +249,8 @@ async function ensureViewerPc() {
   const pc = new RTCPeerConnection(STUN);
   viewerPc = pc;
   pc.addEventListener('track', e => {
+    // kill the jitter-buffer delay: Chrome renders frames as they arrive
+    try { if (e.receiver && 'playoutDelayHint' in e.receiver) e.receiver.playoutDelayHint = 0; } catch {}
     $('#viewerVideo').srcObject = e.streams[0];
   });
   pc.addEventListener('icecandidate', e => {
@@ -360,7 +378,10 @@ async function handleVoiceSignal(from, data) {
         audio.autoplay = true;
         audio.style.display = 'none';
         document.body.appendChild(audio);
-        pc.addEventListener('track', e => { audio.srcObject = e.streams[0]; playAudioEl(audio); });
+        pc.addEventListener('track', e => {
+          try { if (e.receiver && 'playoutDelayHint' in e.receiver) e.receiver.playoutDelayHint = 0; } catch {}
+          audio.srcObject = e.streams[0]; playAudioEl(audio);
+        });
         pc.addEventListener('icecandidate', e => {
           if (e.candidate) socket.emit('stream_signal', { to: from, data: { voice: true, pcDir: 'in', candidate: e.candidate } });
         });

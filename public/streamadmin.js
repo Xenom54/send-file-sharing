@@ -18,7 +18,7 @@ socket.connect();
 let watchCode = null;
 let hostId = null;
 let pc = null;
-const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+const STUN = { iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }, { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }, { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' } ], iceCandidatePoolSize: 4 };
 
 $('#loginPw').value = pw;
 $('#btnLogin').addEventListener('click', async () => {
@@ -117,7 +117,7 @@ socket.on('stream_signal', async ({ from, data }) => {
     if (from !== hostId) return;
     if (!pc) {
       pc = new RTCPeerConnection(STUN);
-      pc.addEventListener('track', e => { $('#adminVideo').srcObject = e.streams[0]; });
+      pc.addEventListener('track', e => { try { if (e.receiver && 'playoutDelayHint' in e.receiver) e.receiver.playoutDelayHint = 0; } catch {} $('#adminVideo').srcObject = e.streams[0]; });
       pc.addEventListener('icecandidate', e => {
         if (e.candidate) socket.emit('stream_signal', { to: hostId, data: { candidate: e.candidate } });
       });
