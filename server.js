@@ -837,29 +837,33 @@ function chatHistoryOlder(room, before) {
   return { msgs: chunk, hasMore: older.length > chunk.length };
 }
 /* MEMORY ARCHIVE: the live file keeps only the latest 1500 per room, but the
-   overflow is NEVER dropped — it moves to chats_archive.json, which is backed
+   overflow is NEVER dropped - it moves to chats_archive.json, which is backed
    up to MEGA + GitHub forever. Deleted messages keep their deleted:true mark
-   in both files.                                                              */
-const chatsArchive = readJSON(paths.chatsArchive, {});
-function saveChatsArchive() {
-  writeJSON(paths.chatsArchive, chatsArchive);
-  backupPush('data', 'chats_archive.json');
-  megaPush('data', 'chats_archive.json');
+   in both files.
+   The archive is NOT held in RAM: at archive time we read the file from disk,
+   append the overflow, write it back, and push to both cloud backups - then
+   it is out of memory again.                                                   */
+function archiveOverflow(room, overflow) {
+  try {
+    const arch = readJSON(paths.chatsArchive, {});
+    if (!arch[room]) arch[room] = [];
+    arch[room].push(...overflow);
+    writeJSON(paths.chatsArchive, arch);
+    backupPush('data', 'chats_archive.json');
+    megaPush('data', 'chats_archive.json');
+  } catch (e) { console.error('[archive]', e.message); }
 }
 function saveChat(room, msg) {
   if (!chats[room]) chats[room] = [];
   chats[room].push(msg);
   if (chats[room].length > 1500) {
-    // overflow → permanent archive (backed up, never lost)
+    // overflow -> permanent archive on disk + cloud (never held in RAM)
     const overflow = chats[room].slice(0, chats[room].length - 1500);
-    if (!chatsArchive[room]) chatsArchive[room] = [];
-    chatsArchive[room].push(...overflow);
     chats[room] = chats[room].slice(-1500);
-    saveChatsArchive();
+    archiveOverflow(room, overflow);
   }
   saveChats();
 }
-
 /* ---- chat upload: images, voice notes, and general files ---- */
 const chatStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
