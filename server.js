@@ -135,9 +135,7 @@ function megaPushUpload(fileName) {
 }
 
 function log(action, detail, req) {
-  const ip = req
-    ? (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown'
-    : 'system';
+  const ip = req ? (clientIp(req) || 'unknown') : 'system';
   const ua = req ? (req.headers['user-agent'] || 'unknown') : 'system';
   logs.unshift({ id: crypto.randomBytes(6).toString('hex'), ts: Date.now(), action, detail, ip, ua });
   if (logs.length > 5000) logs.length = 5000;
@@ -216,6 +214,22 @@ function recordFail(req) {
 }
 function clearFails(req) { loginAttempts.delete(req.ip || 'x'); }
 
+/* socket-side password brute-force guard (C1): the HTTP lockout above only
+   covers HTTP login routes — the socket `join` / `stream_join_admin` password
+   checks would otherwise accept unlimited guesses via cheap reconnects.      */
+const socketPwFails = new Map(); // ip -> { first, count }
+function socketPwBlocked(ip) {
+  const a = socketPwFails.get(ip);
+  if (!a) return null;
+  if (Date.now() - a.first >= LOCK_WINDOW) { socketPwFails.delete(ip); return null; }
+  if (a.count >= LOCK_MAX) return Math.ceil((LOCK_WINDOW - (Date.now() - a.first)) / 60000);
+  return null;
+}
+function socketPwFail(ip) {
+  const a = socketPwFails.get(ip);
+  if (!a) socketPwFails.set(ip, { first: Date.now(), count: 1 }); else a.count++;
+}
+
 /* --------------------------------- upload --------------------------------- */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
@@ -267,7 +281,14 @@ function publicItem(it) {
 
 /* ---------------------------------- app ----------------------------------- */
 const app = express();
-app.set('trust proxy', true);
+app.set('trust proxy', 2); // CF edge + Render proxy only — never trust client-supplied XFF entries
+/* visitor IP: Cloudflare's CF-Connecting-IP is set by Cloudflare itself and
+   cannot be spoofed by the visitor; req.ip (trust proxy 2) is the fallback. */
+const clientIp = req => String(
+  (req.headers && req.headers['cf-connecting-ip']) ||
+  req.ip ||
+  (req.socket && req.socket.remoteAddress) ||
+  '');
 app.use(compression());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -358,7 +379,7 @@ function setUserTimeout(room, uid, minutes) {
    banned accidentally — otherwise bans could never be undone.             */
 app.use((req, res, next) => {
   if (req.path.startsWith('/superadmin') || req.path.startsWith('/api/superadmin')) return next();
-  const hit = isBanned(normIp(req.ip));
+  const hit = isBanned(normIp(clientIp(req)));
   if (hit) {
     const untilTxt = hit.until ? new Date(hit.until).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'permanently';
     return res.status(403).send(`🚫 Your IP has been banned (${untilTxt}). Reason: ${hit.reason || 'no reason given'}`);
@@ -1240,7 +1261,7 @@ function maybeKaliReply(room, userName, text, reqLike) {
   const isKaliRoom = room && room.startsWith('ai-');
   const mentioned = /@(kali|ai)\b/i.test(String(text || ''));
   if (!isKaliRoom && !mentioned) return; // only mentions outside Kali rooms
-  const key = (reqLike && reqLike.socket && reqLike.socket.remoteAddress) + '|' + room;
+  const key = clientIp(reqLike) + '|' + room;
   const now = Date.now();
   const last = kaliLastCall.get(key) || 0;
   if (now - last < 8000) return; // throttled
@@ -1378,7 +1399,13 @@ io.on('connection', (socket) => {
   /* SECRET admin watch: the host sees only "(hidden)" — no name, no real count bump */
   socket.on('stream_join_admin', (data, ack) => {
     try {
-      if (String(data?.pw || '') !== STREAM_ADMIN_PASSWORD) return ack && ack({ error: 'wrong admin password' });
+      // C1: timing-safe compare + the shared socket lockout (was a raw !== with no rate limit)
+      const sip = normIp(socket.handshake.address);
+      if (socketPwBlocked(sip)) return ack && ack({ error: 'too many attempts' });
+      if (!STREAM_ADMIN_PASSWORD || !safeEq(String(data?.pw || ''), STREAM_ADMIN_PASSWORD)) {
+        socketPwFail(sip);
+        return ack && ack({ error: 'wrong admin password' });
+      }
       const c = streamCode(data?.code);
       const s = liveStreams[c];
       if (!s) return ack && ack({ error: 'no such stream' });
@@ -1533,7 +1560,13 @@ io.on('connection', (socket) => {
     room = roomName(data?.room);
     name = String(data?.name || 'anonymous').slice(0, 30);
     const uid = String(data?.uid || '').slice(0, 64);
-    isPrivateAdmin = requirePrivateAdminPw(data?.pw);
+    // C1: socket-side lockout — a wrong/guessed private-admin password counts
+    // toward the same 5-attempts/15-min policy as the HTTP logins. Only
+    // non-empty pw attempts are counted (regular users never send a pw).
+    const sip = normIp(socket.handshake.address);
+    const pwBlocked = socketPwBlocked(sip);
+    isPrivateAdmin = !pwBlocked && requirePrivateAdminPw(data?.pw);
+    if (data?.pw && !isPrivateAdmin) socketPwFail(sip);
     if (!room) { socket.emit('system', { ts: Date.now(), text: 'invalid room' }); return; }
     socket.join(room);
     socket.data.room = room; socket.data.name = name; socket.data.uid = uid; socket.data.admin = isPrivateAdmin;
