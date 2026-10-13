@@ -220,19 +220,20 @@ Roughly in file order:
 
 ## 10. Where we left off / recent history
 
-Recent releases: **v3.27.0 fixed-size chat (every message bubble now spans the FULL messages area — the chat rectangle never changes with any message's length; `scrollbar-gutter: stable` keeps the width constant when the scrollbar appears; the chat container itself widened to `min(1760px, 97vw)`; message text a step smaller: .9rem/1.5, padding 9px 13px, smaller who/time labels, tighter 9px gaps; mobile chat min-height 66vh; missing `.msg-timeout` position rule added (was overlapping text since v3.26.0); cache v=45)**, v3.26.1 admin logout from chat (the 🛡️ button now works both ways: click while active → confirm → the stored password is cleared, the badge/panel hide, and the socket silently re-joins as a normal user — server de-admins it, so badges/exemptions/presence end; the button shows its state via ghost style + tooltip; cache v=44), v3.26.0 in-chat moderation (private admins can mute the room / timeout any user directly from ANY /private#code chat: ⏳ button on message hover + member rows, 🔇/🔊 mute controls + live badge in the members panel, new `mod_mute_room`/`mod_timeout_user` socket events (admin-only, can't timeout self or other admins), join ack + `role` event carry mute state, `msg_rejected` finally has a client handler → clear rejection toasts, `role` is now emitted BEFORE history + the client re-renders on it so admin actions show on existing messages, cache v=43), v3.25.1 hotfix (superadmin bans survive redeploys: bans/mutes/superadmin/streamadmin/folders restore into MEMORY at boot — the "Active bans empty / Failed to load bans" bug; superadmin.js no longer reload-loops on 401 — shows the login card instead; error toasts carry the reason; cache v=42), v3.25.0 room mutes & user timeouts (privateadmin), v3.24.0 hidden /superadmin IP-ban panel (temporary/permanent, 403 on every route + socket cut, self-ban escape hatch), v3.23.0 zero-memory archive, v3.22.1 kick flow completion, v3.22.0 streamer kick & ban, v3.21.0→v3.19.1 stream viewer list / direct links / min-fps hotfix, v3.18.0 host viewer list, v3.17.0 1080p60 + zero-delay, v3.16.0 recycle-bin delete-all, v3.15.0 bidi + agent-notify plugins, v3.14.0 phantom leave/join + presence dedupe, v3.13.0 grouped-time + app-like chat scroll, v3.12.0 reply-quote jump-to-original (auto-loads older pages) + hidden scrollbar strips in the writing boxes, v3.11.0 security audit + this handoff file, v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
+Recent releases: **v3.28.0 chat layout fix (v3.27.0's full-width stacked look REVERTED after owner feedback: classic messenger alignment — MY bubbles RIGHT (`align-self: flex-end`), THEIRS LEFT, content-fitted, capped `min(78%, 720px)` / 86% mobile; chat box genuinely fills the window (`max-width: none` + 10px gutters, rooms panel 240→220px, messages padding 14×16); bubbles visibly smaller: .85rem/1.45, 8×12 padding; mobile chat 88vh; kept scrollbar-gutter stable; cache v=46)**, **v3.27.0 fixed-size chat (every message bubble now spans the FULL messages area — superseded by v3.28.0; `scrollbar-gutter: stable` KEPT; `.msg-timeout` position rule added (was overlapping text since v3.26.0); cache v=45)**, v3.26.1 admin logout from chat (the 🛡️ button now works both ways: click while active → confirm → the stored password is cleared, the badge/panel hide, and the socket silently re-joins as a normal user — server de-admins it, so badges/exemptions/presence end; the button shows its state via ghost style + tooltip; cache v=44), v3.26.0 in-chat moderation (private admins can mute the room / timeout any user directly from ANY /private#code chat: ⏳ button on message hover + member rows, 🔇/🔊 mute controls + live badge in the members panel, new `mod_mute_room`/`mod_timeout_user` socket events (admin-only, can't timeout self or other admins), join ack + `role` event carry mute state, `msg_rejected` finally has a client handler → clear rejection toasts, `role` is now emitted BEFORE history + the client re-renders on it so admin actions show on existing messages, cache v=43), v3.25.1 hotfix (superadmin bans survive redeploys: bans/mutes/superadmin/streamadmin/folders restore into MEMORY at boot — the "Active bans empty / Failed to load bans" bug; superadmin.js no longer reload-loops on 401 — shows the login card instead; error toasts carry the reason; cache v=42), v3.25.0 room mutes & user timeouts (privateadmin), v3.24.0 hidden /superadmin IP-ban panel (temporary/permanent, 403 on every route + socket cut, self-ban escape hatch), v3.23.0 zero-memory archive, v3.22.1 kick flow completion, v3.22.0 streamer kick & ban, v3.21.0→v3.19.1 stream viewer list / direct links / min-fps hotfix, v3.18.0 host viewer list, v3.17.0 1080p60 + zero-delay, v3.16.0 recycle-bin delete-all, v3.15.0 bidi + agent-notify plugins, v3.14.0 phantom leave/join + presence dedupe, v3.13.0 grouped-time + app-like chat scroll, v3.12.0 reply-quote jump-to-original (auto-loads older pages) + hidden scrollbar strips in the writing boxes, v3.11.0 security audit + this handoff file, v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
 `sendImage` handler that had silently broken chat file uploads, v3.8.0 permanent
 chats_archive + bulk recycle, v3.7.0 direct `#public`/`#kali` links, v3.6.0 Linux audio
 fallback panel, v3.5.0 Arabic filenames, v3.4.0 full voice mesh.
 
-Current state: **v3.27.0** — the chat layout is now fixed-size: all bubbles span
-the full messages area (uniform rectangles that never change with content),
-the container fills up to `min(1760px, 97vw)`, and message text is a step
-smaller. In-chat moderation (v3.26.0) + matching admin logout (v3.26.1) remain:
-the 🛡️ header button toggles admin mode both ways from any chat
-(`send_privateadmin_pw` is cleared, the socket re-joins without the pw so the
-server strips the admin flag). All pages at cache v=45. v3.25.1 fixed the
-superadmin ban persistence
+Current state: **v3.28.0** — classic messenger chat layout: MY bubbles right,
+THEIRS left, content-fitted with `min(78%, 720px)` caps (86% mobile); the chat
+box fills the whole window (`max-width: none` + 10px gutters, 220px rooms
+panel); bubble text .85rem/1.45, 8×12 padding; `scrollbar-gutter: stable`
+kept so the box width never jumps. In-chat moderation (v3.26.0) + matching
+admin logout (v3.26.1) remain: the 🛡️ header button toggles admin mode both
+ways from any chat (`send_privateadmin_pw` is cleared, the socket re-joins
+without the pw so the server strips the admin flag). All pages at cache v=46.
+v3.25.1 fixed the superadmin ban persistence
 (Redis-less restore re-reads everything into memory — see v3.25.1 notes below)
 and the /superadmin reload loop.
 
@@ -240,6 +241,11 @@ Known platform limits (not bugs): Linux/macOS full-screen audio capture is impos
 in browsers (mitigated); Render free tier CPU freezes are absorbed by the 60 s
 pingTimeout + silent rejoins.
 
-Suggested next steps if you continue: consider per-room admin moderation tools in
-`/privateadmin`, a stream viewer list for the host, and Redis-less horizontal scaling is
-NOT possible as-is (single-process memory) — one instance per room-shard if ever needed.
+Suggested next steps if you continue: admin room SEARCH inside /privateadmin
+(messages are in RAM — a `GET /api/chat/rooms/:room/search?q=` + a client box),
+batched disk writes (every chat message rewrites chats.json + logs.json —
+coalesce ~250ms), immutable `?v=N` caching for /static + backup-failure
+verdict in /api/health (uptime-bot keyword alert), self-hosted fonts
+(typography spec already drafted). Redis-less horizontal scaling is NOT
+possible as-is (single-process memory) — one instance per room-shard if ever
+needed.
