@@ -251,6 +251,7 @@ function joinRoom(code, opts = {}) {
   $('#roomIcon').textContent = isKali ? '✨' : (code === 'public' ? '🌍' : '💬');
   if (!iAmAdmin) $('#adminBadge').classList.add('hidden');
   $('#btnDeleteRoom').style.display = 'none';
+  roomMutedUntil = 0; // the join ack refreshes it for admins
   if (!silent) {
     $('#messages').innerHTML = '';
     restoreDraft(code); // load any saved draft for this room
@@ -269,6 +270,8 @@ function joinRoom(code, opts = {}) {
       iAmAdmin = true;
       $('#adminBadge').classList.remove('hidden');
       $('#membersPanel').classList.remove('hidden');
+      roomMutedUntil = ack.mutedUntil || 0;
+      refreshMuteBadge();
     }
     refreshDeleteRoomBtn();
   });
@@ -311,7 +314,11 @@ $('#adminConfirm').addEventListener('click', async () => {
       $('#membersPanel').classList.remove('hidden');
       toast('🛡️ Admin mode active');
       socket.emit('join', { room: currentRoom, name: userName(), uid: store.uid, pw }, (ack) => {
-        if (ack && ack.admin) { refreshDeleteRoomBtn(); }
+        if (ack && ack.admin) {
+          refreshDeleteRoomBtn();
+          roomMutedUntil = ack.mutedUntil || 0;
+          refreshMuteBadge();
+        }
       });
     } else {
       $('#adminPwError').textContent = 'Wrong password';
@@ -334,8 +341,72 @@ socket.on('presence', ({ room, online }) => {
   });
   $('#membersCount').textContent = unique.length;
   $('#membersList').innerHTML = unique.length
-    ? unique.map(u => `<div class="member-row"><span class="dot on"></span>${esc(u.name)}${u.admin ? ' 🛡️' : ''}</div>`).join('')
+    ? unique.map(u => {
+        const canTimeout = !u.admin && u.uid && u.uid !== store.uid;
+        return `<div class="member-row"><span class="dot on"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(u.name)}${u.admin ? ' 🛡️' : ''}</span>${canTimeout ? `<button class="btn small" data-mtimeout="${esc(u.uid)}" data-name="${esc(u.name)}" title="Timeout this user" style="opacity:.7;padding:2px 8px">⏳</button>` : ''}</div>`;
+      }).join('')
     : '<div class="small muted">Nobody else online.</div>';
+});
+
+/* ------------------- in-chat moderation (private admin) -------------------
+   Mute the whole room or timeout any user directly from ANY chat room —
+   no /privateadmin detour. Same persisted state the panel uses.            */
+let roomMutedUntil = 0;
+
+function refreshMuteBadge() {
+  const muted = roomMutedUntil > Date.now();
+  $('#btnMuteRoom').classList.toggle('hidden', muted);
+  $('#btnUnmuteRoom').classList.toggle('hidden', !muted);
+  const badge = $('#roomMutedBadge');
+  badge.classList.toggle('hidden', !muted);
+  if (muted) {
+    const left = Math.max(0, Math.round((roomMutedUntil - Date.now()) / 60000));
+    badge.textContent = '🔇 ' + (left >= 60 ? Math.floor(left / 60) + 'h ' + (left % 60) + 'm' : left + 'm');
+  }
+}
+
+function modTimeout(uid, name) {
+  if (!iAmAdmin || !uid) return;
+  const answer = prompt(
+    `⏳ Timeout ${name} for how many minutes?\n\n` +
+    '10 = 10 min · 60 = 1 hour · 1440 = 1 day · 10080 = 1 week\n' +
+    'Leave EMPTY to remove their timeout.', '60');
+  if (answer === null) return; // cancelled
+  const trimmed = String(answer).trim();
+  const minutes = Number(trimmed) || 0;
+  if (trimmed && minutes <= 0) return toast('⚠ Enter a positive number of minutes', 'err');
+  socket.emit('mod_timeout_user', { uid, name, minutes }, (ack) => {
+    if (ack && ack.ok) toast(minutes > 0 ? `⏳ ${name} timed out for ${minutes} minutes` : `⏳ ${name}'s timeout was removed`);
+    else toast('⚠ ' + ((ack && ack.error) || 'Failed'), 'err');
+  });
+}
+
+$('#btnMuteRoom').addEventListener('click', () => {
+  if (!iAmAdmin || !currentRoom) return;
+  const answer = prompt(
+    '🔇 Mute this whole room for how many minutes?\n\n' +
+    '10 = 10 min · 60 = 1 hour · 1440 = 1 day · 10080 = 1 week\n' +
+    'Leave EMPTY to unmute.', '60');
+  if (answer === null) return; // cancelled
+  const minutes = Number(String(answer).trim()) || 0;
+  socket.emit('mod_mute_room', { minutes }, (ack) => {
+    if (ack && ack.ok) {
+      roomMutedUntil = ack.mutedUntil || 0;
+      refreshMuteBadge();
+      toast(minutes > 0 ? `🔇 Room muted for ${minutes} minutes` : '🔊 Room unmuted');
+    } else toast('⚠ ' + ((ack && ack.error) || 'Failed'), 'err');
+  });
+});
+$('#btnUnmuteRoom').addEventListener('click', () => {
+  if (!iAmAdmin || !currentRoom) return;
+  socket.emit('mod_mute_room', { minutes: 0 }, (ack) => {
+    if (ack && ack.ok) { roomMutedUntil = 0; refreshMuteBadge(); toast('🔊 Room unmuted'); }
+    else toast('⚠ ' + ((ack && ack.error) || 'Failed'), 'err');
+  });
+});
+$('#membersList').addEventListener('click', e => {
+  const t = e.target.closest('[data-mtimeout]');
+  if (t) modTimeout(t.dataset.mtimeout, t.dataset.name);
 });
 
 /* ------------------------------- send / img ------------------------------- */
@@ -439,10 +510,12 @@ function actionsHTML(m, mine) {
   // hover actions for EVERY message type: edit (own text), reply (all), delete (own/admin)
   const canEdit = (mine || iAmAdmin) && !m.bot && !!m.text && !m.image && !m.audio && !m.cfile;
   const canDelete = mine || iAmAdmin;
+  const canTimeout = iAmAdmin && !mine && !m.bot && !!m.uid; // in-chat moderation
   let out = '';
   if (canEdit) out += `<button class="msg-act msg-edit" data-edit="${m.id}" title="Edit">✎</button>`;
   out += `<button class="msg-act msg-reply" data-reply="${m.id}" title="Reply">↩</button>`;
   if (canDelete) out += `<button class="msg-act msg-del" data-del="${m.id}" title="Delete">✕</button>`;
+  if (canTimeout) out += `<button class="msg-act msg-timeout" data-timeout="${esc(m.uid)}" data-name="${esc(m.name)}" title="Timeout this user">⏳</button>`;
   return out;
 }
 
@@ -512,7 +585,8 @@ function appendMsg(m, mine, opts = {}) {
 function appendSys(m) {
   const el = document.createElement('div');
   el.className = 'sys';
-  el.innerHTML = `<span>${esc((m.kind === 'join' ? '→ ' : m.kind === 'leave' ? '← ' : '⚠ ') + m.text)}</span>`;
+  const pre = m.kind === 'join' ? '→ ' : m.kind === 'leave' ? '← ' : m.kind === 'mod' ? '' : '⚠ ';
+  el.innerHTML = `<span>${esc(pre + m.text)}</span>`;
   $('#messages').appendChild(el);
   $('#messages').scrollTop = $('#messages').scrollHeight;
   lastRendered = { sys: true };
@@ -538,6 +612,8 @@ $('#messages').addEventListener('click', e => {
     socket.emit('delmsg', { id: del.dataset.del });
     return;
   }
+  const to = e.target.closest('[data-timeout]');
+  if (to) return modTimeout(to.dataset.timeout, to.dataset.name);
   const vmPlay = e.target.closest('.vm-play');
   if (vmPlay) return toggleVoice(vmPlay.closest('.voice-msg'));
   const vmWave = e.target.closest('.vm-wave');
@@ -822,6 +898,29 @@ socket.on('msg', m => {
 socket.on('system', m => {
   appendSys(m);
   if (m.kind === 'delete') setTimeout(() => location.href = '/private', 1600);
+  if (m.kind === 'mod' && iAmAdmin) refreshMuteBadge(); // keep the admin badge in sync
+});
+/* the server reports the role right after join — trust it even before the join
+   ack, and re-render so admin actions (delete / timeout) appear on the history
+   (note: role.owner only means "this room HAS an owner" — never touch iAmOwner) */
+socket.on('role', ({ admin }) => {
+  const was = iAmAdmin;
+  iAmAdmin = !!admin || iAmAdmin;
+  if (iAmAdmin && !was) {
+    $('#adminBadge').classList.remove('hidden');
+    $('#membersPanel').classList.remove('hidden');
+    if (lastMsgs.length) {
+      $('#messages').innerHTML = '';
+      lastRendered = null;
+      lastMsgs.forEach(m => appendMsg(m, m.uid === store.uid));
+      $('#messages').scrollTop = $('#messages').scrollHeight;
+    }
+  }
+});
+/* rejected sends (room muted / user timeout) — the sender ALWAYS gets a clear toast */
+socket.on('msg_rejected', (r) => {
+  if (r && r.reason === 'room-muted' && r.until) { roomMutedUntil = r.until; refreshMuteBadge(); }
+  toast('⚠ ' + ((r && r.text) || 'Your message was rejected'), 'err');
 });
 socket.on('typing', ({ name, typing }) => {
   $('#typingInd').textContent = typing ? name + ' is typing…' : '';

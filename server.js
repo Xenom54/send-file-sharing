@@ -1558,8 +1558,10 @@ io.on('connection', (socket) => {
     emitPresenceToAdmins(room);
     if (isPrivateAdmin) socket.emit('presence', { room, online: roomPresence(room) });
 
-    socket.emit('history', chatHistory(room));
+    // role FIRST, then history — so an admin client knows its role before
+    // rendering messages (admin actions appear on existing messages too)
     socket.emit('role', { admin: isPrivateAdmin, owner: !!roomOwners[room] });
+    socket.emit('history', chatHistory(room));
     // private admins enter privately everywhere except the public chat
     const stealth = isPrivateAdmin && room !== 'public';
     /* join-announcement rules (the phantom leave/join fix):
@@ -1573,7 +1575,8 @@ io.on('connection', (socket) => {
       io.to(room).emit('system', { ts: Date.now(), text: `${name}${isPrivateAdmin ? ' (private admin)' : ''} joined the room`, kind: 'join' });
     }
     log(isPrivateAdmin ? 'chat_admin_join' : 'chat_join', `room=${room} name=${name}${stealth ? ' (stealth)' : ''}${wasQuickReconnect ? ' (reconnect)' : ''}${rejoinedSilently ? ' (silent)' : ''}`, reqLike());
-    if (ack) ack({ ok: true, admin: isPrivateAdmin });
+    // mutedUntil lets an in-chat private admin render the room's mute state instantly
+    if (ack) ack({ ok: true, admin: isPrivateAdmin, mutedUntil: roomMutedUntil(room) || 0 });
     } catch (e) { console.error('[io join]', e.message); }
   });
 
@@ -1670,6 +1673,46 @@ io.on('connection', (socket) => {
     if (!room) return;
     socket.to(room).emit('typing', { name, typing: !!isTyping });
     } catch (e) { console.error('[io typing]', e.message); }
+  });
+
+  /* ---------------- in-chat moderation (private admin, any room) ----------------
+     A private admin in /private#code can mute the whole room or timeout a user
+     right from the chat — no /privateadmin detour. Same state as the panel.   */
+  const durTxt = m => (m >= 1440 && m % 1440 === 0) ? (m / 1440) + (m === 1440 ? ' day' : ' days')
+    : (m >= 60 && m % 60 === 0) ? (m / 60) + (m === 60 ? ' hour' : ' hours') : m + ' minutes';
+
+  socket.on('mod_mute_room', (data, ack) => {
+    try {
+    if (!isPrivateAdmin || !room) return ack && ack({ error: 'private admin only' });
+    const minutes = Number(data?.minutes) || 0;
+    setRoomMute(room, minutes);
+    const until = roomMutedUntil(room) || 0;
+    log('room_mute', `room=${room} ${minutes > 0 ? minutes + ' min' : 'unmuted'} (in-chat)`, reqLike());
+    // room-wide notice (wording stays vague on purpose — never names the admin)
+    io.to(room).emit('system', { ts: Date.now(), kind: 'mod', text: minutes > 0 ? `🔇 This room was muted for ${durTxt(minutes)} — nobody can send until then.` : '🔊 This room was unmuted — everyone can talk again.' });
+    ack && ack({ ok: true, mutedUntil: until });
+    } catch (e) { console.error('[io mod_mute_room]', e.message); ack && ack({ error: 'failed' }); }
+  });
+
+  socket.on('mod_timeout_user', (data, ack) => {
+    try {
+    if (!isPrivateAdmin || !room) return ack && ack({ error: 'private admin only' });
+    const uid = String(data?.uid || '').slice(0, 64);
+    const targetName = String(data?.name || 'user').slice(0, 30);
+    const minutes = Number(data?.minutes) || 0; // 0 = remove the timeout
+    if (!uid) return ack && ack({ error: 'user id required' });
+    if (uid === socket.data.uid) return ack && ack({ error: "you can't timeout yourself" });
+    // private admins can never be timed out by another admin
+    const targetIsAdmin = [...(presence[room] || new Map()).values()].some(p => p.uid === uid && p.admin);
+    if (targetIsAdmin) return ack && ack({ error: "that user is a private admin" });
+    setUserTimeout(room, uid, minutes);
+    log('user_timeout', `room=${room} uid=${uid} name=${targetName} ${minutes > 0 ? minutes + ' min' : 'removed'} (in-chat)`, reqLike());
+    // tell the timed-out user right away (if online in this room) — discreet: no room broadcast
+    for (const [, s] of io.sockets.sockets) {
+      if (s.data.room === room && s.data.uid === uid) s.emit('msg_rejected', { reason: 'user-timeout', until: userTimedOutUntil(room, uid), text: minutes > 0 ? `You are timed out in this room for ${durTxt(minutes)}` : 'Your timeout in this room was removed' });
+    }
+    ack && ack({ ok: true, name: targetName, minutes });
+    } catch (e) { console.error('[io mod_timeout_user]', e.message); ack && ack({ error: 'failed' }); }
   });
 
   socket.on('disconnect', () => {

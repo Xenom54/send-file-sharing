@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Chat</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=42">
+  <link rel="stylesheet" href="/static/style.css?v=43">
 </head>
 <body>
   <nav class="navbar">
@@ -66,7 +66,12 @@
 
         <!-- members panel: private admin only -->
         <div id="membersPanel" class="hidden" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
-          <div class="ph">👥 Online now <span class="pill ok" id="membersCount">0</span></div>
+          <div class="ph">👥 Online now <span class="pill ok" id="membersCount">0</span>
+            <span class="pill bad hidden" id="roomMutedBadge"></span>
+            <span style="flex:1"></span>
+            <button class="btn small" id="btnMuteRoom" title="Mute this room — nobody can send">🔇</button>
+            <button class="btn small ghost hidden" id="btnUnmuteRoom" title="Unmute this room">🔊</button>
+          </div>
           <div class="member-list" id="membersList"></div>
         </div>
       </div>
@@ -122,9 +127,9 @@
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=42"></script>
-  <script src="/static/profile.js?v=42"></script>
-  <script src="/static/bidi.js?v=42"></script>
-  <script src="/static/private.js?v=42"></script>
+  <script src="/static/notify.js?v=43"></script>
+  <script src="/static/profile.js?v=43"></script>
+  <script src="/static/bidi.js?v=43"></script>
+  <script src="/static/private.js?v=43"></script>
 </body>
 </html>

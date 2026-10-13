@@ -127,6 +127,10 @@ Roughly in file order:
   (`history_more`), prepends while keeping scroll position.
 - **Notifications** (`notify.js`): per-device WebAudio ding, presets/custom/always;
   sound ONLY for chat when unfocused (uploads never ding).
+- **In-chat moderation** (v3.26.0): private admins get ⏳ (timeout) on other users'
+  messages and member rows, plus 🔇/🔊 room-mute with a live badge in the members
+  panel — same persisted state as /privateadmin (`mutes.json`); rejected sends show
+  clear toasts via the `msg_rejected` handler.
 
 ## 6. Streams (`public/stream.js` + server) — READ THIS CAREFULLY
 
@@ -216,18 +220,21 @@ Roughly in file order:
 
 ## 10. Where we left off / recent history
 
-Recent releases: **v3.25.1 hotfix (superadmin bans survive redeploys: bans/mutes/superadmin/streamadmin/folders restore into MEMORY at boot — the "Active bans empty / Failed to load bans" bug; superadmin.js no longer reload-loops on 401 — shows the login card instead; error toasts carry the reason; cache v=42)**, v3.25.0 room mutes & user timeouts (privateadmin), v3.24.0 hidden /superadmin IP-ban panel (temporary/permanent, 403 on every route + socket cut, self-ban escape hatch), v3.23.0 zero-memory archive, v3.22.1 kick flow completion, v3.22.0 streamer kick & ban, v3.21.0→v3.19.1 stream viewer list / direct links / min-fps hotfix, v3.18.0 host viewer list, v3.17.0 1080p60 + zero-delay, v3.16.0 recycle-bin delete-all, v3.15.0 bidi + agent-notify plugins, v3.14.0 phantom leave/join + presence dedupe, v3.13.0 grouped-time + app-like chat scroll, v3.12.0 reply-quote jump-to-original (auto-loads older pages) + hidden scrollbar strips in the writing boxes, v3.11.0 security audit + this handoff file, v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
+Recent releases: **v3.26.0 in-chat moderation (private admins can mute the room / timeout any user directly from ANY /private#code chat: ⏳ button on message hover + member rows, 🔇/🔊 mute controls + live badge in the members panel, new `mod_mute_room`/`mod_timeout_user` socket events (admin-only, can't timeout self or other admins), join ack + `role` event carry mute state, `msg_rejected` finally has a client handler → clear rejection toasts, `role` is now emitted BEFORE history + the client re-renders on it so admin actions show on existing messages, cache v=43)**, v3.25.1 hotfix (superadmin bans survive redeploys: bans/mutes/superadmin/streamadmin/folders restore into MEMORY at boot — the "Active bans empty / Failed to load bans" bug; superadmin.js no longer reload-loops on 401 — shows the login card instead; error toasts carry the reason; cache v=42), v3.25.0 room mutes & user timeouts (privateadmin), v3.24.0 hidden /superadmin IP-ban panel (temporary/permanent, 403 on every route + socket cut, self-ban escape hatch), v3.23.0 zero-memory archive, v3.22.1 kick flow completion, v3.22.0 streamer kick & ban, v3.21.0→v3.19.1 stream viewer list / direct links / min-fps hotfix, v3.18.0 host viewer list, v3.17.0 1080p60 + zero-delay, v3.16.0 recycle-bin delete-all, v3.15.0 bidi + agent-notify plugins, v3.14.0 phantom leave/join + presence dedupe, v3.13.0 grouped-time + app-like chat scroll, v3.12.0 reply-quote jump-to-original (auto-loads older pages) + hidden scrollbar strips in the writing boxes, v3.11.0 security audit + this handoff file, v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
 `sendImage` handler that had silently broken chat file uploads, v3.8.0 permanent
 chats_archive + bulk recycle, v3.7.0 direct `#public`/`#kali` links, v3.6.0 Linux audio
 fallback panel, v3.5.0 Arabic filenames, v3.4.0 full voice mesh.
 
-Current state: **v3.25.1** — the /superadmin IP-ban panel now fully works across
-redeploys: `bans.json`, `mutes.json`, `superadmin.json`, `streamadmin.json` are in
-`RESTORE_DATA_FILES` (13 files) AND are re-read into memory after the boot restore
-(restore-before-reload was silently wiping them: any later save() wrote the stale
-empty memory over the restored file). The panel client treats 401 as "session
-expired → login card" and never `location.reload()`s (the old loop trapped the
-operator with an unusable panel). All pages at cache v=42.
+Current state: **v3.26.0** — in-chat moderation shipped: a private admin in any
+chat room sees ⏳ on other users' messages and member rows (timeout) and
+🔇/🔊 room-mute controls with a live remaining-time badge in the members panel.
+Moderation state is the SAME persisted mutes.json the /privateadmin panel uses,
+so panel and chat stay in sync. Server guards: admin-only events, no
+self-timeout, no timing out other private admins; timeout notices are discreet
+(only the target is told), room mute broadcasts a vague room-wide notice.
+All pages at cache v=43. v3.25.1 fixed the superadmin ban persistence
+(Redis-less restore re-reads everything into memory — see v3.25.1 notes below)
+and the /superadmin reload loop.
 
 Known platform limits (not bugs): Linux/macOS full-screen audio capture is impossible
 in browsers (mitigated); Render free tier CPU freezes are absorbed by the 60 s
