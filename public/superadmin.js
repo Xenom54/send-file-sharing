@@ -15,10 +15,22 @@ function toast(msg, kind = 'ok') {
 const PW_KEY = 'send_superadmin_pw';
 let pw = sessionStorage.getItem(PW_KEY) || '';
 
+/* back to the login screen on any 401 — NEVER location.reload() (that used to
+   trap the panel in an infinite reload loop where nothing could be loaded) */
+function sessionExpired() {
+  sessionStorage.removeItem(PW_KEY);
+  pw = '';
+  $('#loginCard').classList.remove('hidden');
+  $('#dash').classList.add('hidden');
+  toast('⚠ Session expired — log in again', 'err');
+}
+
 async function loadBans() {
   try {
-    const list = await (await fetch('/api/superadmin/bans', { headers: { 'x-pw': pw } })).json();
-    if (!Array.isArray(list)) return location.reload();
+    const r = await fetch('/api/superadmin/bans', { headers: { 'x-pw': pw } });
+    if (r.status === 401) return sessionExpired();
+    const list = await r.json();
+    if (!Array.isArray(list)) throw new Error('unexpected server response');
     const perm = list.filter(b => b.permanent).length;
     $('#stats').innerHTML = [
       ['Active bans', list.length, '🚫'],
@@ -36,12 +48,15 @@ async function loadBans() {
         <td class="nowrap">${esc(ago(b.at))} ago</td>
         <td><button class="btn small" data-unban="${esc(b.ip)}">↩ Unban</button></td>
       </tr>`).join('') : `<tr><td colspan="6" class="muted" style="text-align:center;padding:34px">No active bans. The site is open to everyone.</td></tr>`;
-  } catch { toast('⚠ Failed to load bans', 'err'); }
+  } catch (e) { console.error('[loadBans]', e); toast('⚠ Failed to load bans: ' + (e && e.message ? e.message : 'network error'), 'err'); }
 }
 
 async function loadRecentIps() {
   try {
-    const list = await (await fetch('/api/superadmin/ips', { headers: { 'x-pw': pw } })).json();
+    const r = await fetch('/api/superadmin/ips', { headers: { 'x-pw': pw } });
+    if (r.status === 401) return; // loadBans() already handles the expired session
+    const list = await r.json();
+    if (!Array.isArray(list)) throw new Error('unexpected server response');
     $('#recentIps').innerHTML = list.length ? list.map(x => `
       <div class="pane-row" data-ip="${esc(x.ip)}" style="cursor:pointer">
         <div><div class="pr-title mono">${esc(x.ip)}</div><div class="small muted">last seen ${esc(ago(x.last))} ago ${x.banned ? '· <span style="color:#fb7185">BANNED</span>' : ''}</div></div>
@@ -61,25 +76,34 @@ $('#btnBan').addEventListener('click', async () => {
   let minutes = $('#banDuration').value === 'custom' ? Number($('#banCustomMin').value) || 0 : Number($('#banDuration').value);
   const reason = $('#banReason').value.trim();
   if (!confirm(`Ban ${ip} ${minutes > 0 ? 'for ' + minutes + ' minutes' : 'PERMANENTLY'}?`)) return;
-  const r = await fetch('/api/superadmin/bans', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pw': pw },
-    body: JSON.stringify({ ip, minutes, reason }),
-  });
-  const d = await r.json();
-  if (r.ok) { toast(`🚫 ${ip} banned ${d.permanent ? 'permanently' : 'for ' + minutes + ' minutes'}`); $('#banIp').value = ''; $('#banReason').value = ''; loadBans(); }
-  else toast('⚠ ' + (d.error || 'Failed'), 'err');
+  try {
+    const r = await fetch('/api/superadmin/bans', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pw': pw },
+      body: JSON.stringify({ ip, minutes, reason }),
+    });
+    if (r.status === 401) return sessionExpired();
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { toast(`🚫 ${ip} banned ${d.permanent ? 'permanently' : 'for ' + minutes + ' minutes'}`); $('#banIp').value = ''; $('#banReason').value = ''; loadBans(); }
+    else toast('⚠ ' + (d.error || 'Failed'), 'err');
+  } catch (e) { toast('⚠ Ban failed: ' + (e && e.message ? e.message : 'network error'), 'err'); }
 });
 
 $('#bansBody').addEventListener('click', async e => {
   const ub = e.target.closest('[data-unban]');
   if (!ub) return;
   if (!confirm(`Unban ${ub.dataset.unban}? They will be able to access the site again.`)) return;
-  const r = await fetch('/api/superadmin/unban', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pw': pw },
-    body: JSON.stringify({ ip: ub.dataset.unban }),
-  });
-  if (r.ok) { toast('✓ ' + ub.dataset.unban + ' unbanned'); loadBans(); }
-  else toast('⚠ Failed', 'err');
+  try {
+    const r = await fetch('/api/superadmin/unban', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pw': pw },
+      body: JSON.stringify({ ip: ub.dataset.unban }),
+    });
+    if (r.status === 401) return sessionExpired();
+    if (r.ok) { toast('✓ ' + ub.dataset.unban + ' unbanned'); loadBans(); }
+    else {
+      const d = await r.json().catch(() => ({}));
+      toast('⚠ Unban failed: ' + (d.error || 'unknown error'), 'err');
+    }
+  } catch (e) { toast('⚠ Unban failed: ' + (e && e.message ? e.message : 'network error'), 'err'); }
 });
 
 $('#banDuration').addEventListener('change', () => {
@@ -90,9 +114,11 @@ $('#loginPw').value = pw;
 $('#btnLogin').addEventListener('click', async () => {
   pw = $('#loginPw').value.trim();
   if (!pw) return toast('⚠ Enter the password', 'err');
-  const r = await fetch('/api/superadmin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pw }) });
-  if (r.ok) { sessionStorage.setItem(PW_KEY, pw); toast('✓ Welcome, super admin'); enter(); }
-  else toast('⚠ Wrong password', 'err');
+  try {
+    const r = await fetch('/api/superadmin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pw }) });
+    if (r.ok) { sessionStorage.setItem(PW_KEY, pw); toast('✓ Welcome, super admin'); enter(); }
+    else toast('⚠ Wrong password', 'err');
+  } catch { toast('⚠ Login failed — network error', 'err'); }
 });
 $('#loginPw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnLogin').click(); });
 $('#btnLogout').addEventListener('click', () => { sessionStorage.removeItem(PW_KEY); pw = ''; location.reload(); });
@@ -102,7 +128,8 @@ function enter() {
   $('#loginCard').classList.add('hidden');
   $('#dash').classList.remove('hidden');
   loadBans(); loadRecentIps();
-  setInterval(loadBans, 30000); // live expiry countdowns
+  // live expiry countdowns — only poll while the dashboard is actually shown
+  setInterval(() => { if (!$('#dash').classList.contains('hidden')) loadBans(); }, 30000);
 }
 
 if (pw) enter();

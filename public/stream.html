@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send — Stream</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=37">
+  <link rel="stylesheet" href="/static/style.css?v=42">
 </head>
 <body>
   <nav class="navbar">
@@ -92,6 +92,8 @@
       <span class="pill ok" id="liveDot">● LIVE</span>
       <span class="count" id="viewerCount">0 viewers</span>
       <span class="spacer" style="flex:1"></span>
+      <button class="btn small" id="btnRecord" title="Record this stream (saved to the site + cloud backups)">⏺ Record</button>
+      <span class="rec-timer hidden" id="recTimer">00:00</span>
       <button class="btn small" id="btnHostMic" title="Talk to your viewers (mic)">🎙️</button>
       <button class="btn small" id="btnPreview" title="Show/hide your preview (avoid the mirror loop)">👁</button>
       <button class="btn small danger" id="btnStopStream">⏹ Stop</button>
@@ -175,9 +177,9 @@
 
   <div class="toasts" id="toasts"></div>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=37"></script>
-  <script src="/static/profile.js?v=37"></script>
-  <script src="/static/bidi.js?v=37"></script>
-  <script src="/static/stream.js?v=37"></script>
+  <script src="/static/notify.js?v=42"></script>
+  <script src="/static/profile.js?v=42"></script>
+  <script src="/static/bidi.js?v=42"></script>
+  <script src="/static/stream.js?v=42"></script>
 </body>
 </html>

@@ -1708,6 +1708,10 @@ const RESTORE_DATA_FILES = [
   ['privateadmin.json', paths.privateadmin],
   ['kali.json', path.join(DATA_DIR, 'kali.json')],
   ['folders.json', path.join(DATA_DIR, 'folders.json')],
+  ['bans.json', path.join(DATA_DIR, 'bans.json')],
+  ['mutes.json', path.join(DATA_DIR, 'mutes.json')],
+  ['superadmin.json', path.join(DATA_DIR, 'superadmin.json')],
+  ['streamadmin.json', path.join(DATA_DIR, 'streamadmin.json')],
 ];
 
 /* MEGA first (full fidelity), GitHub fills any still-missing files */
@@ -1721,7 +1725,7 @@ async function megaRestoreData() {
       if (buf) { fs.writeFileSync(target, buf); restored++; }
     } catch (e) { console.error('[mega] restore', name, e.message); }
   }
-  console.log(`[mega] restored /9 data files`);
+  console.log(`[mega] restored /13 data files`);
   return restored;
 }
 
@@ -1735,7 +1739,7 @@ async function backupRestoreData() {
       if (f && f.content) { fs.writeFileSync(target, Buffer.from(f.content, 'base64')); restored++; }
     } catch (e) { console.error('[backup] restore', name, e.message); }
   }
-  console.log(`[backup] restored /9 data files`);
+  console.log(`[backup] restored /13 data files`);
   return restored;
 }
 
@@ -1792,6 +1796,9 @@ async function backupRestoreUploads() {
       console.log('[backup] local data empty — restoring from cloud backup…');
       await megaRestoreData();     // MEGA first (has everything)
       await backupRestoreData();   // GitHub fills any gaps
+      // re-read EVERYTHING that was restored into memory — memory must match
+      // disk, otherwise the next save() wipes the restored file with the
+      // stale (empty) in-memory state (this is how bans/folders were lost)
       items.length = 0; items.push(...readJSON(paths.items, []));
       logs.length = 0; logs.push(...readJSON(paths.logs, []));
       for (const k of Object.keys(chats)) delete chats[k];
@@ -1800,11 +1807,40 @@ async function backupRestoreUploads() {
       Object.assign(roomOwners, readJSON(paths.owners, {}));
       for (const k of Object.keys(chatVisitors)) delete chatVisitors[k];
       Object.assign(chatVisitors, readJSON(paths.visitors, {}));
-      // re-read the restored private-admin password (unless env forces it)
+      // folders: was missed before → folders silently vanished after a restore
+      const restoredFolders = readJSON(paths.folders, {});
+      if (restoredFolders && typeof restoredFolders === 'object' && !Array.isArray(restoredFolders)) {
+        for (const k of Object.keys(folders)) delete folders[k];
+        Object.assign(folders, restoredFolders);
+      }
+      // superadmin IP bans + room mutes/timeouts (the "Active bans is empty" bug)
+      const restoredBans = readJSON(paths.bans, {});
+      if (restoredBans && typeof restoredBans === 'object' && !Array.isArray(restoredBans)) {
+        for (const k of Object.keys(bans)) delete bans[k];
+        Object.assign(bans, restoredBans);
+      }
+      const restoredMutes = readJSON(paths.mutes, { rooms: {}, users: {} });
+      if (restoredMutes && typeof restoredMutes === 'object' && !Array.isArray(restoredMutes)) {
+        for (const k of Object.keys(mutes)) delete mutes[k];
+        Object.assign(mutes, restoredMutes);
+        mutes.rooms = mutes.rooms || {}; mutes.users = mutes.users || {};
+      }
+      // re-read the restored panel passwords (unless env forces them)
       if (!process.env.PRIVATE_ADMIN_PASSWORD) {
         const storedPac = readJSON(paths.privateadmin, null);
         if (storedPac && storedPac.password) PRIVATE_ADMIN_PASSWORD = storedPac.password;
       }
+      if (!process.env.SUPERADMIN_PASSWORD) {
+        const storedSuper = readJSON(path.join(DATA_DIR, 'superadmin.json'), null);
+        if (storedSuper && storedSuper.password) SUPERADMIN_PASSWORD = storedSuper.password;
+      }
+      if (!process.env.STREAM_ADMIN_PASSWORD) {
+        const storedStream = readJSON(path.join(DATA_DIR, 'streamadmin.json'), null);
+        if (storedStream && storedStream.password) STREAM_ADMIN_PASSWORD = storedStream.password;
+      }
+      // re-read the Kali personality (setup() is idempotent: re-reads kali.json)
+      kali.setup();
+      console.log(`[boot] runtime state reloaded from restored files — ${Object.keys(bans).length} ban(s), ${Object.keys(folders).length} folder(s)`);
       // restore uploaded files in the background: MEGA first, GitHub after
       megaRestoreUploads().then(() => backupRestoreUploads()).catch(() => {});
     }

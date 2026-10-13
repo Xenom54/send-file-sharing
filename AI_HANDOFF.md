@@ -194,6 +194,11 @@ Roughly in file order:
    (`pruneLocal`) — never delete from its internal files map (crashes its handler).
 10. **Express returns 404 for method-mismatch** — probe routes with a POST and expect
     401 (auth guard) vs 404 (missing).
+11. **NEVER use PowerShell `Get-Content`/`Set-Content` on UTF-8 source files** — on this
+    machine they silently decode as CP-1252 and re-encode as UTF-8 (double-encoding
+    mojibake + BOM), corrupting every emoji/Arabic char in the file. Once bit all seven
+    HTML pages; repaired by reverse-mapping CP-1252 → bytes → UTF-8. Edit such files
+    with the file-edit tools only, and re-read a page after any scripted write.
 
 ## 9. Security posture (audited & hardened — keep it this way)
 
@@ -211,15 +216,18 @@ Roughly in file order:
 
 ## 10. Where we left off / recent history
 
-Recent releases: v3.19.1 hotfix (min-fps constraint broke streaming on some devices), v3.19.0 direct stream links (/stream#code auto-entry, password-first), v3.18.0 host viewer list, v3.17.0 1080p60 + zero-delay, v3.16.0 recycle-bin delete-all, v3.15.0 bidi + agent-notify plugins, v3.14.0 phantom leave/join + presence dedupe, v3.13.0 grouped-time + app-like chat scroll, v3.12.0 reply-quote jump-to-original (auto-loads older pages) + hidden scrollbar strips in the writing boxes, v3.11.0 security audit + this handoff file, v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
+Recent releases: **v3.25.1 hotfix (superadmin bans survive redeploys: bans/mutes/superadmin/streamadmin/folders restore into MEMORY at boot — the "Active bans empty / Failed to load bans" bug; superadmin.js no longer reload-loops on 401 — shows the login card instead; error toasts carry the reason; cache v=42)**, v3.25.0 room mutes & user timeouts (privateadmin), v3.24.0 hidden /superadmin IP-ban panel (temporary/permanent, 403 on every route + socket cut, self-ban escape hatch), v3.23.0 zero-memory archive, v3.22.1 kick flow completion, v3.22.0 streamer kick & ban, v3.21.0→v3.19.1 stream viewer list / direct links / min-fps hotfix, v3.18.0 host viewer list, v3.17.0 1080p60 + zero-delay, v3.16.0 recycle-bin delete-all, v3.15.0 bidi + agent-notify plugins, v3.14.0 phantom leave/join + presence dedupe, v3.13.0 grouped-time + app-like chat scroll, v3.12.0 reply-quote jump-to-original (auto-loads older pages) + hidden scrollbar strips in the writing boxes, v3.11.0 security audit + this handoff file, v3.10.0 multiline Shift+Enter, v3.9.0 dark voice player + fixed a stale
 `sendImage` handler that had silently broken chat file uploads, v3.8.0 permanent
 chats_archive + bulk recycle, v3.7.0 direct `#public`/`#kali` links, v3.6.0 Linux audio
 fallback panel, v3.5.0 Arabic filenames, v3.4.0 full voice mesh.
 
-Current state: **v3.11.0** — this audit release hardens: x-pw headers everywhere,
-timing-safe compares, lockout on all panel logins, nosniff on all uploads, chat flood
-guard, Kali rate-limit. All 51 automated sweep checks pass; no XSS sites; no stale
-identifiers; all DOM ids resolve; every page is at cache v=22+.
+Current state: **v3.25.1** — the /superadmin IP-ban panel now fully works across
+redeploys: `bans.json`, `mutes.json`, `superadmin.json`, `streamadmin.json` are in
+`RESTORE_DATA_FILES` (13 files) AND are re-read into memory after the boot restore
+(restore-before-reload was silently wiping them: any later save() wrote the stale
+empty memory over the restored file). The panel client treats 401 as "session
+expired → login card" and never `location.reload()`s (the old loop trapped the
+operator with an unusable panel). All pages at cache v=42.
 
 Known platform limits (not bugs): Linux/macOS full-screen audio capture is impossible
 in browsers (mitigated); Render free tier CPU freezes are absorbed by the 60 s
