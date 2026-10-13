@@ -252,6 +252,7 @@ function joinRoom(code, opts = {}) {
   if (!iAmAdmin) $('#adminBadge').classList.add('hidden');
   $('#btnDeleteRoom').style.display = 'none';
   roomMutedUntil = 0; // the join ack refreshes it for admins
+  updateAdminBtn();
   if (!silent) {
     $('#messages').innerHTML = '';
     restoreDraft(code); // load any saved draft for this room
@@ -285,9 +286,14 @@ function refreshDeleteRoomBtn() {
   $('#btnDeleteRoom').style.display = canDelete ? '' : 'none';
 }
 
-/* ---------------------------- admin unlock (hidden) ----------------------- */
+/* ---------------------------- admin unlock / lock ------------------------- */
+function updateAdminBtn() {
+  $('#btnAdminUnlock').classList.toggle('ghost', !iAmAdmin);
+  $('#btnAdminUnlock').title = iAmAdmin ? 'Admin mode active — click to log out' : 'Admin mode';
+}
+
 $('#btnAdminUnlock').addEventListener('click', () => {
-  if (iAmAdmin) return toast('✓ Admin mode already active');
+  if (iAmAdmin) return deactivateAdmin(); // the same button logs OUT of admin mode
   $('#adminPwInput').value = '';
   $('#adminPwError').textContent = '';
   $('#adminModal').classList.add('open');
@@ -296,6 +302,24 @@ $('#btnAdminUnlock').addEventListener('click', () => {
 $('#adminCancel').addEventListener('click', () => $('#adminModal').classList.remove('open'));
 $('#adminModal').addEventListener('click', e => { if (e.target.id === 'adminModal') $('#adminModal').classList.remove('open'); });
 $('#adminPwInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#adminConfirm').click(); });
+
+/* log OUT of admin mode from the chat — the mirror of the 🛡️ unlock: clears the
+   stored password, drops the admin flag, and silently re-joins the room as a
+   normal user (server side: admin presence flag, badges and exemptions end) */
+function deactivateAdmin() {
+  if (!iAmAdmin) return;
+  if (!confirm('Deactivate admin mode?\n\nYou will act as a normal user in this room until you unlock again.')) return;
+  sessionStorage.removeItem('send_privateadmin_pw');
+  iAmAdmin = false;
+  roomMutedUntil = 0;
+  $('#adminBadge').classList.add('hidden');
+  $('#membersPanel').classList.add('hidden');
+  refreshMuteBadge();
+  refreshDeleteRoomBtn();
+  updateAdminBtn();
+  socket.emit('join', { room: currentRoom, name: userName(), uid: store.uid, rejoin: true });
+  toast('🛡️ Admin mode deactivated');
+}
 
 $('#adminConfirm').addEventListener('click', async () => {
   const pw = $('#adminPwInput').value;
@@ -312,6 +336,7 @@ $('#adminConfirm').addEventListener('click', async () => {
       iAmAdmin = true;
       $('#adminBadge').classList.remove('hidden');
       $('#membersPanel').classList.remove('hidden');
+      updateAdminBtn();
       toast('🛡️ Admin mode active');
       socket.emit('join', { room: currentRoom, name: userName(), uid: store.uid, pw }, (ack) => {
         if (ack && ack.admin) {
@@ -909,6 +934,7 @@ socket.on('role', ({ admin }) => {
   if (iAmAdmin && !was) {
     $('#adminBadge').classList.remove('hidden');
     $('#membersPanel').classList.remove('hidden');
+    updateAdminBtn();
     if (lastMsgs.length) {
       $('#messages').innerHTML = '';
       lastRendered = null;
