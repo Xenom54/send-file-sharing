@@ -590,7 +590,7 @@ function showFolder(name) {
   $('#btnFolderDelete').onclick = async () => {
     if (!confirm(`Delete folder "${name}"? Items inside return to the main page.`)) return;
     const token = localStorage.getItem('send_foldertok_' + name) || '';
-    const r = await fetch(`/api/folders/${encodeURIComponent(name)}?token=${encodeURIComponent(token)}`, { method: 'DELETE' });
+    const r = await fetch(`/api/folders/${encodeURIComponent(name)}`, { method: 'DELETE', headers: { 'x-owner-token': token } }); // token in header, never in URLs
     if (r.ok) {
       localStorage.removeItem('send_foldertok_' + name);
       activeFolder = null;

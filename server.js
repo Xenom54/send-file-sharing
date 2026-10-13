@@ -214,6 +214,30 @@ function recordFail(req) {
 }
 function clearFails(req) { loginAttempts.delete(req.ip || 'x'); }
 
+/* per-IP upload rate limiter (v3.29.0): uploads are unauthenticated by design
+   (public file sharing), so cap the burst — 30 files / 10 min / IP. */
+const uploadHits = new Map(); // ip -> [timestamps]
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60e3;
+  for (const [ip, arr] of uploadHits) {
+    const keep = arr.filter(t => t > cutoff);
+    if (keep.length) uploadHits.set(ip, keep); else uploadHits.delete(ip);
+  }
+}, 5 * 60e3).unref();
+function uploadRateOk(req) {
+  const ip = clientIp(req) || 'x';
+  const cutoff = Date.now() - 10 * 60e3;
+  const arr = (uploadHits.get(ip) || []).filter(t => t > cutoff);
+  if (arr.length >= 30) return false;
+  arr.push(Date.now());
+  uploadHits.set(ip, arr);
+  return true;
+}
+function uploadRateLimited(req, res, next) {
+  if (!uploadRateOk(req)) return res.status(429).json({ error: 'too many uploads — wait a few minutes' });
+  next();
+}
+
 /* socket-side password brute-force guard (C1): the HTTP lockout above only
    covers HTTP login routes — the socket `join` / `stream_join_admin` password
    checks would otherwise accept unlimited guesses via cheap reconnects.      */
@@ -289,6 +313,29 @@ const clientIp = req => String(
   req.ip ||
   (req.socket && req.socket.remoteAddress) ||
   '');
+
+/* security headers on EVERY response (v3.29.0 hardening):
+   - HSTS without includeSubDomains (sibling subdomains on this domain may not be HTTPS)
+   - strict CSP: the pages have zero inline <script>; Google Fonts + blob media allowed
+   - frame-ancestors 'none' + XFO DENY (clickjacking), nosniff everywhere */
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self), payment=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self'; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src https://fonts.gstatic.com; " +
+    "img-src 'self' data: blob: https:; " +
+    "media-src 'self' blob:; " +
+    "connect-src 'self' wss:; " +
+    "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  next();
+});
 app.use(compression());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -512,7 +559,7 @@ app.post('/api/items/text', (req, res) => {
   res.json(publicItem(it));
 });
 
-app.post('/api/items/upload', upload.single('file'), (req, res) => {
+app.post('/api/items/upload', uploadRateLimited, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no file or type rejected' });
   const originalName = fixUploadName(req.file.originalname);
   const it = {
@@ -538,7 +585,7 @@ app.post('/api/items/upload', upload.single('file'), (req, res) => {
   res.json(publicItem(it));
 });
 
-app.post('/api/items/audio', upload.single('audio'), (req, res) => {
+app.post('/api/items/audio', uploadRateLimited, upload.single('audio'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no audio' });
   const it = {
     id: newId(),
@@ -860,7 +907,7 @@ app.delete('/api/folders/:name', (req, res) => {
   const f = folders[name];
   if (!f) return res.status(404).json({ error: 'no such folder' });
   const isAdmin = isAuthorized(req);
-  const token = String(req.query.token || '');
+  const token = String(req.headers['x-owner-token'] || req.query.token || '');
   if (!isAdmin && f.ownerToken !== token) return res.status(401).json({ error: 'only the folder owner or an admin' });
   delete folders[name];
   for (const it of items) if (it.folder === name) delete it.folder;
@@ -1049,7 +1096,7 @@ const chatUpload = multer({
   fileFilter: (req, file, cb) => cb(null, true),
 });
 
-app.post('/api/chat/upload', chatUpload.single('file'), (req, res) => {
+app.post('/api/chat/upload', uploadRateLimited, chatUpload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no file or type rejected' });
   backupPushUpload(req.file.filename);
   megaPushUpload(req.file.filename);
@@ -1068,7 +1115,7 @@ server.headersTimeout = 0;
 server.keepAliveTimeout = 0;
 /* tolerant heartbeat: Render's free tier briefly freezes/throttles the CPU —
    with a 60s pong window a 30-40s freeze no longer drops everyone's socket */
-const io = new Server(server, { maxHttpBufferSize: 30 * 1024 * 1024, pingInterval: 25000, pingTimeout: 60000 });
+const io = new Server(server, { maxHttpBufferSize: 1 * 1024 * 1024, pingInterval: 25000, pingTimeout: 60000 });
 io.use(socketBanHook);
 
 function roomName(v) { return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40); }
@@ -1190,6 +1237,8 @@ app.delete('/api/chat/rooms/:room', (req, res) => {
   const room = roomName(req.params.room);
   if (!room) return res.status(400).json({ error: 'invalid room' });
   if (room === 'public') return res.status(403).json({ error: 'the public chat cannot be deleted' });
+  // memories invariant: archive the room's messages BEFORE removing the room
+  if (chats[room] && chats[room].length) archiveOverflow(room, chats[room].slice());
   delete chats[room];
   delete chatVisitors[room];
   saveChats(); saveVisitors();
@@ -1201,9 +1250,10 @@ app.delete('/api/chat/rooms/:room', (req, res) => {
 /* creator of a room may delete it */
 app.delete('/api/chat/rooms/:room/mine', (req, res) => {
   const room = roomName(req.params.room);
-  const token = String(req.query.token || '');
+  const token = String(req.headers['x-owner-token'] || req.query.token || '');
   if (!room) return res.status(400).json({ error: 'invalid room' });
   if (roomOwners[room] !== token) return res.status(401).json({ error: 'only the room creator can delete this room' });
+  if (chats[room] && chats[room].length) archiveOverflow(room, chats[room].slice());
   delete chats[room];
   delete roomOwners[room];
   delete chatVisitors[room];
@@ -1257,11 +1307,13 @@ function panelLoginBlocked(req, res) {
 /* Kali rate limit: one Gemini call per user every 8s (protects the API quota
    from mention-spam; the bot simply stays quiet for over-eager users)      */
 const kaliLastCall = new Map();
-function maybeKaliReply(room, userName, text, reqLike) {
+function maybeKaliReply(room, userName, text, reqLike, uid) {
   const isKaliRoom = room && room.startsWith('ai-');
   const mentioned = /@(kali|ai)\b/i.test(String(text || ''));
   if (!isKaliRoom && !mentioned) return; // only mentions outside Kali rooms
-  const key = clientIp(reqLike) + '|' + room;
+  // keyed by the STABLE device uid (falls back to IP) — switching rooms no
+  // longer resets the limit, and a spoofed XFF cannot mint new buckets
+  const key = (String(uid || '').slice(0, 64) || clientIp(reqLike) || 'x') + '|' + (isKaliRoom ? 'ai' : 'mention');
   const now = Date.now();
   const last = kaliLastCall.get(key) || 0;
   if (now - last < 8000) return; // throttled
@@ -1327,6 +1379,12 @@ io.on('connection', (socket) => {
          (grace timer pending), the returning host takes the stream back —
          viewers keep watching, the stream is never killed by a blip. */
       if (liveStreams[c] && pendingHostEnd.has(c)) {
+        // H1: re-adoption now requires the stream's owner secret — anyone who
+        // learns the (public) code can no longer hijack a stream mid-grace.
+        const s0 = liveStreams[c];
+        if (!s0.ownerKey || !safeEq(String(data?.ownerKey || ''), s0.ownerKey)) {
+          return ack && ack({ error: 'not your stream' });
+        }
         clearTimeout(pendingHostEnd.get(c));
         pendingHostEnd.delete(c);
         const s = liveStreams[c];
@@ -1344,9 +1402,10 @@ io.on('connection', (socket) => {
         return;
       }
       if (liveStreams[c]) return ack && ack({ error: 'code already live' });
+      const ownerKey = newId(); // secret returned once to the creator; required to re-adopt
       liveStreams[c] = {
         code: c, hostId: socket.id, hostName: String(data?.name || 'anonymous').slice(0, 30),
-        pw: data?.pw ? hashPw(String(data.pw)) : null, viewers: new Map(), startedAt: Date.now(),
+        pw: data?.pw ? hashPw(String(data.pw)) : null, ownerKey, viewers: new Map(), startedAt: Date.now(),
         chat: [],
         banned: new Set(), // kicked viewers (by uid) can never rejoin this stream
       };
@@ -1358,7 +1417,7 @@ io.on('connection', (socket) => {
       socket.emit('stream_chat_history', liveStreams[c].chat || []);
       io.emit('stream_update', { streams: streamListPublic() });
       log('stream_start', `code=${c} host=${data?.name}${data?.pw ? ' +pw' : ''}`, reqLikeS());
-      if (ack) ack({ ok: true, code: c });
+      if (ack) ack({ ok: true, code: c, ownerKey }); // the creator's re-adoption secret
     } catch (e) { console.error('[stream start]', e.message); ack && ack({ error: 'failed' }); }
   });
 
@@ -1481,6 +1540,8 @@ io.on('connection', (socket) => {
   socket.on('stream_signal', (data) => {
     try {
       if (!streamJoined || !data?.to) return;
+      // voice signals must carry a known direction — drop spoofed pcDir values
+      if (data.data?.voice && data.data.pcDir !== 'out' && data.data.pcDir !== 'in') return;
       const target = io.sockets.sockets.get(String(data.to));
       if (!target || target.data?.streamCode !== streamJoined) return;
       target.emit('stream_signal', { from: socket.id, data: data.data });
@@ -1542,6 +1603,7 @@ io.on('connection', (socket) => {
    - "left" broadcasts are delayed 20s and cancelled if they come back
    - a rejoin within the window broadcasts NO "joined" message either        */
 const pendingLeave = new Map(); // `uid|room` → { timer, room, name }
+const uidMsgTimes = new Map();  // flood guard per STABLE device uid (v3.29.0)
 const recentlyLeft = new Map(); // `uid|room` → ts (a "left" was actually broadcast)
 
 io.on('connection', (socket) => {
@@ -1616,12 +1678,23 @@ io.on('connection', (socket) => {
   socket.on('msg', (data) => {
     try {
     if (!room) return;
-    /* flood guard: max 10 messages per socket per 5 seconds (silent drop).
+    /* flood guard: max 10 messages per socket per 5 seconds (silent drop),
+       PLUS a second bucket keyed by the stable device uid — reconnects and
+       extra sockets from the same device no longer bypass it.
        Normal humans can't hit this; scripts can't fill the room.            */
     const now = Date.now();
     socket.data.msgTimes = (socket.data.msgTimes || []).filter(ts => now - ts < 5000);
     if (socket.data.msgTimes.length >= 10) return;
     socket.data.msgTimes.push(now);
+    const myUid = String(socket.data.uid || '');
+    if (myUid) {
+      const ukey = myUid + '|' + room;
+      const uarr = (uidMsgTimes.get(ukey) || []).filter(ts => now - ts < 5000);
+      if (uarr.length >= 10) return;
+      uarr.push(now);
+      uidMsgTimes.set(ukey, uarr);
+      if (uidMsgTimes.size > 2000) uidMsgTimes.clear();
+    }
     const t = String(data?.text || '').slice(0, 4000);
     const img = String(data?.image || '').slice(0, 2000);
     const aud = String(data?.audio || '').slice(0, 2000);
@@ -1653,7 +1726,7 @@ io.on('connection', (socket) => {
     io.to(room).emit('msg', msg);
     if (room === 'public') io.emit('public_activity', { room });
     log('chat_msg', `room=${room} len=${t.length}${img ? ' +image' : ''}${aud ? ' +audio' : ''}${cf ? ' +file' : ''}${msg.replyTo ? ' +reply' : ''}`, reqLike());
-    maybeKaliReply(room, name, t, reqLike());
+    maybeKaliReply(room, name, t, reqLike(), socket.data.uid);
     } catch (e) { console.error('[io msg]', e.message); }
   });
 
@@ -1927,7 +2000,12 @@ async function backupRestoreUploads() {
     console.log(`Admin panel:          http://localhost:${PORT}/admin`);
     console.log(`Private chat:         http://localhost:${PORT}/private`);
     if (process.env.ADMIN_PASSWORD) console.log('Admin password: supplied via ADMIN_PASSWORD env var');
-    else console.log(`Default admin password: ${ADMIN_PASSWORD_DEFAULT}  (change it in the admin panel)`);
+    else {
+      console.log(`Default admin password: ${ADMIN_PASSWORD_DEFAULT}  (change it in the admin panel)`);
+      if (process.env.NODE_ENV === 'production' && !adminCfg.set) {
+        console.warn('⚠ SECURITY WARNING: this production deployment is still using the DEFAULT admin password ("admin123"). Change it immediately in /admin → Settings, or set ADMIN_PASSWORD.');
+      }
+    }
     console.log(`Data dir: ${DATA_DIR} · Uploads dir: ${UPLOAD_DIR}`);
     console.log(`Private-admin password: ${PRIVATE_ADMIN_PASSWORD}${process.env.PRIVATE_ADMIN_PASSWORD ? ' (from env)' : ' — set PRIVATE_ADMIN_PASSWORD env to change'}`);
     console.log(mega.configured() ? 'MEGA backup: ENABLED (push on change + restore when empty)' : 'MEGA backup: not configured');

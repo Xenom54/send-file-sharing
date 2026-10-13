@@ -833,11 +833,16 @@ $('#btnDeleteRoom').addEventListener('click', async () => {
   if (!currentRoom) return;
   if (!iAmAdmin && !iAmOwner) return;
   if (!confirm(`Delete room #${currentRoom} and all its messages?`)) return;
-  const url = iAmAdmin
-    ? `/api/chat/rooms/${encodeURIComponent(currentRoom)}?pw=${encodeURIComponent(sessionStorage.getItem('send_privateadmin_pw') || '')}`
-    : `/api/chat/rooms/${encodeURIComponent(currentRoom)}/mine?token=${encodeURIComponent(store.ownerToken(currentRoom) || '')}`;
+  const headers = {};
+  let url = `/api/chat/rooms/${encodeURIComponent(currentRoom)}`; // private-admin route
+  if (!iAmAdmin) {
+    url = `/api/chat/rooms/${encodeURIComponent(currentRoom)}/mine`; // creator route
+    headers['x-owner-token'] = store.ownerToken(currentRoom) || ''; // tokens in headers, never in URLs
+  } else {
+    headers['x-pw'] = sessionStorage.getItem('send_privateadmin_pw') || '';
+  }
   try {
-    const r = await fetch(url, { method: 'DELETE' });
+    const r = await fetch(url, { method: 'DELETE', headers });
     const d = await r.json();
     if (!r.ok) return toast('⚠ ' + (d.error || 'Delete failed'), 'err');
     toast('🗑 Room deleted');

@@ -45,12 +45,13 @@ const Profile = (() => {
   }
 
   /* chip shown in the main-page navbar (click to change name anytime) */
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' }[c]));
   function chip(hostSel) {
     const host = document.querySelector(hostSel);
     if (!host) return;
     const render = () => {
       const n = get() || 'guest';
-      host.innerHTML = `<button class="name-chip" title="Change your name">👤 ${n} ✎</button>`;
+      host.innerHTML = `<button class="name-chip" title="Change your name">👤 ${esc(n)} ✎</button>`;
       host.querySelector('.name-chip').addEventListener('click', async () => {
         const nv = await ensureModal(true);
         // let every page react to the change (chats use the new name on the next join/message)

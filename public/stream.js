@@ -27,6 +27,7 @@ let viewerPc = null;             // viewer side: single PC to the host
 let hostId = null;
 let lastJoinPw = '';  // viewer: remember the stream password for silent rejoins
 let lastHostPw = '';  // host: remember for re-adopting after a reconnect
+let myOwnerKey = '';  // host: the stream's re-adoption secret (returned once at start)
 /* ICE: Google STUN for direct paths + free OpenRelay TURN so streams connect
    even behind strict NATs (TURN is only used when direct P2P fails) */
 let STUN = {
@@ -128,6 +129,7 @@ $('#hostGo').addEventListener('click', async () => {
     role = 'host';
     myCode = ack.code;
     lastHostPw = pw;
+    myOwnerKey = ack.ownerKey || '';
     if (!ack.reAdopted) viewerPcs.clear(); // fresh start (a re-adopt keeps existing viewer PCs)
     $('#hostModal').classList.remove('open');
     $('#gate').classList.add('hidden');
@@ -148,7 +150,81 @@ async function stopHosting() {
   showGate();
   toast('Stream ended');
 }
+/* ==================== CLIENT-SIDE RECORDING ====================
+   MediaRecorder taps the LOCAL capture - the WebRTC senders are never
+   touched, so stream quality is unaffected. On stop, the recording is
+   uploaded through the normal pipeline and lands in the main grid +
+   MEGA + GitHub backups automatically.                            */
+let recorder = null, recChunks = [], recTimerInt = null, recStart = 0;
+function recFmt(ms) {
+  const sec = Math.floor(ms / 1000);
+  return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+}
+function pickRecMime() {
+  for (const m of ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';
+}
+$('#btnRecord').addEventListener('click', () => {
+  if (role !== 'host' || !localStream) return;
+  if (recorder) return stopRecording();
+  const mime = pickRecMime();
+  try {
+    recChunks = [];
+    recorder = new MediaRecorder(localStream, mime ? { mimeType: mime, videoBitsPerSecond: 8 * 1024 * 1024 } : undefined);
+  } catch (e) { return toast('Recording not supported in this browser', 'err'); }
+  recorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => uploadFromChunks(recorder, recChunks);
+  recorder.start(1000);
+  recStart = Date.now();
+  $('#btnRecord').classList.add('recording');
+  $('#btnRecord').textContent = 'Stop rec';
+  $('#recTimer').classList.remove('hidden');
+  recTimerInt = setInterval(() => { $('#recTimer').textContent = recFmt(Date.now() - recStart); }, 500);
+  toast('Recording started - kept in memory until you stop');
+});
+async function stopRecording() {
+  if (!recorder) return;
+  const mr = recorder;
+  try { mr.stop(); } catch (e) { console.error('[rec stop]', e); }
+  clearInterval(recTimerInt);
+  $('#btnRecord').classList.remove('recording');
+  $('#btnRecord').textContent = 'Record';
+  $('#recTimer').classList.add('hidden');
+  // SAFETY NET: the stop event does not fire in every environment (e.g.
+  // frame-less captures). If onstop hasn't uploaded within 800 ms, upload
+  // the collected chunks directly.
+  setTimeout(() => {
+    if (recorder === mr && recChunks.length) {
+      recorder = null;
+      uploadFromChunks(mr, recChunks);
+      recChunks = [];
+    }
+  }, 800);
+}
+let recUploading = false;
+async function uploadFromChunks(mr, chunks) {
+  if (recUploading) return;
+  recUploading = true;
+  try {
+    const blob = new Blob(chunks, { type: (mr && mr.mimeType) || 'video/webm' });
+    const dur = recFmt(Date.now() - recStart);
+    if (blob.size < 10000) { recUploading = false; return toast('Recording too short - nothing saved', 'err'); }
+    toast('Uploading recording (' + dur + ')...');
+    const fd = new FormData();
+    fd.append('file', blob, 'stream-recording-' + myCode + '-' + Date.now() + '.webm');
+    fd.append('title', 'Stream recording - ' + myCode + ' (' + dur + ')');
+    const r = await fetch('/api/items/upload', { method: 'POST', body: fd });
+    if (r.ok) toast('Recording saved to the main page + MEGA + GitHub backups');
+    else toast('Recording upload failed', 'err');
+  } catch { toast('Recording upload failed', 'err'); }
+  recUploading = false;
+}
+
 function cleanupHost() {
+  if (recorder) { try { recorder.onstop = null; recorder.stop(); } catch {} recorder = null; recChunks = []; }
+  clearInterval(recTimerInt);
   viewerPcs.forEach(pc => pc.close());
   viewerPcs.clear();
   stopMic();                       // mesh voice: mic + all in/out voice PCs
@@ -159,6 +235,7 @@ function cleanupHost() {
   peers.clear();
   localStream?.getTracks().forEach(t => t.stop());
   localStream = null;
+  myOwnerKey = '';
   $('#scMessages').innerHTML = '';
   $('#noAudioHint')?.classList.add('hidden');
   role = null; myCode = null;
@@ -667,7 +744,7 @@ socket.on('stream_host', ({ hostId: hid }) => {
 });
 socket.on('connect', () => {
   if (role === 'host' && myCode) {
-    socket.emit('stream_start', { code: myCode, pw: lastHostPw, name: myName() }, (ack) => {
+    socket.emit('stream_start', { code: myCode, pw: lastHostPw, name: myName(), ownerKey: myOwnerKey }, (ack) => {
       if (ack && ack.ok) { /* re-adopted — media never stopped */ }
       // if it failed, the stream truly ended → the stream_ended event already handled cleanup
     });
