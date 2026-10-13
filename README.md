@@ -1,167 +1,166 @@
-# 📨 Send — file sharing · live streaming · AI chat
+<div align="center">
 
-> 👑 **With the code of Qai9rr**
+# 📨 Send
 
-A self-hosted Node.js platform to share **any file**, **live-stream your screen**,
-and **chat with a real AI bot (Kali)**. Dark premium UI, English throughout.
+### File sharing · Live streaming · AI chat — one dark, fast, self-hosted platform
 
-## What's inside
+**Share any file up to 20 GB · stream your screen peer-to-peer · chat with Kali, your AI companion**
+
+[🌐 **Open the live site**](https://send.qai9rr.dpdns.org) ·
+[📦 Releases](https://github.com/Xenom54/send-file-sharing/releases) ·
+[🤖 AI_HANDOFF](AI_HANDOFF.md)
+
+[![Release](https://img.shields.io/github/v/release/Xenom54/send-file-sharing?style=flat-square&label=version&color=7c6cff)](https://github.com/Xenom54/send-file-sharing/releases)
+[![Node](https://img.shields.io/badge/node-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](package.json)
+[![Storage](https://img.shields.io/badge/storage-JSON%20files-orange?style=flat-square)](#-where-data-lives)
+[![Deploy](https://img.shields.io/badge/deploy-Render%20%7C%20Railway%20%7C%20VPS-46a3ff?style=flat-square)](#️-deploy-to-the-internet)
+[![Chat](https://img.shields.io/badge/chat-WebRTC%20%2B%20Socket.IO-8b5cf6?style=flat-square)](#-live-streaming--stream)
+[![AI](https://img.shields.io/badge/AI-Kali%20%F0%9F%A4%96-e879f9?style=flat-square)](#-private-chat--private)
+
+👑 **With the code of Qai9rr**
+
+</div>
+
+---
+
+| | |
+|:---|:---|
+| 📨 **Share anything** — 20 GB per file, **every file type accepted**, folders with passwords, voice notes, drag & drop + Ctrl+V paste | 💬 **Chat with Kali AI** — public + private rooms, files & voice notes in-chat, replies with quotes, edits, unread dots |
+| 📡 **Live streams** — WebRTC peer-to-peer screen sharing, **full-mesh voice** (everyone hears everyone), mini chat, blip-proof reconnects | 🛡️ **Four hidden panels** — site admin, chat moderation, secret stream watching, IP bans — all scrypt-hashed with brute-force lockouts |
+
+## 🗺 The pages
 
 | Page | What it is |
 |---|---|
-| `/` | Share text, files, images, voice recordings — up to **20 GB** each, **any file type** |
-| `/stream` | **Live screen sharing** (WebRTC) with password-protected streams, mini chat, and **voice chat both ways** |
-| `/private` | Public + private chat rooms with the **Kali AI bot** (`@kali`), files, voice notes |
+| [`/`](https://send.qai9rr.dpdns.org) | Share text, files, images, voice recordings — up to **20 GB** each, **any file type** |
+| [`/stream`](https://send.qai9rr.dpdns.org/stream) | **Live screen sharing** (WebRTC) with password-protected streams, mini chat, and **two-way voice chat** |
+| [`/private`](https://send.qai9rr.dpdns.org/private) | Public + private chat rooms with the **Kali AI bot** (`@kali`), files, voice notes |
 | `/admin` | Hidden admin panel — stats, per-IP visitor cards, activity log, recycle bin, all passwords |
-| `/privateadmin` | Hidden chat-moderation super-admin (invisible in rooms, reads/deletes anything) |
+| `/privateadmin` | Hidden chat-moderation super-admin — invisible (stealth) in rooms, mutes, timeouts, reads/deletes anything |
 | `/streamadmin` | Hidden stream panel — **secretly watch any live stream**, force-stop any stream |
+| `/superadmin` | Hidden IP-ban panel — temporary or permanent bans enforced on every route **and** socket |
 
-## ▶️ Run locally
+> 💡 The admin panels are **deliberately not linked** in the navbar — people reach them only if they know the URL.
 
-```bat
-start.bat
-```
-or
-```
+## 🚀 Quick start
+
+```bash
+git clone https://github.com/Xenom54/send-file-sharing.git
+cd send-file-sharing
 npm install
-node server.js
+node server.js          # or just: start.bat   (Windows)
 ```
 
-- **Main site** — <http://localhost:3000>
-- **Admin panel** — <http://localhost:3000/admin> · password `admin123` (change it!)
-- **Stream** — <http://localhost:3000/stream>
+| URL | What |
+|---|---|
+| <http://localhost:3000> | the main site |
+| <http://localhost:3000/admin> | admin panel — password `admin123` (**change it**) |
+| <http://localhost:3000/stream> | live streaming |
 
-> The admin / privateadmin / streamadmin pages are **deliberately not linked**
-> in the navbar — people reach them only if they know the URL.
+Docker works too — a `Dockerfile` is included: `docker build -t send . && docker run -p 3000:3000 -v data:/app/data -v uploads:/app/uploads send`
 
-### Environment variables
+## ⚙️ Environment variables
+
 | Var | Default | Purpose |
 |---|---|---|
 | `PORT` | `3000` | listen port |
 | `ADMIN_PASSWORD` | `admin123` | forces the admin password (reapplied on every boot) |
-| `DATA_DIR` | `./data` | where json stores live |
-| `UPLOAD_DIR` | `./uploads` | where uploaded files live |
-| `COOKIE_SECURE` | `0` | set `1` when serving over HTTPS |
 | `PRIVATE_ADMIN_PASSWORD` | `admin123` | password for the hidden `/privateadmin` super-admin |
 | `STREAM_ADMIN_PASSWORD` | `admin123` | password for the hidden `/streamadmin` panel |
-| `KALI_GEMINI_KEY` | — | Google Gemini API key (the AI bot is disabled without it) |
-| `MEGA_EMAIL` | — | MEGA account email (primary cloud backup) |
-| `MEGA_PASSWORD` | — | MEGA account password (2FA must be off for unattended logins) |
+| `SUPERADMIN_PASSWORD` | `admin123` | password for the hidden `/superadmin` IP-ban panel |
+| `DATA_DIR` | `./data` | where the JSON stores live |
+| `UPLOAD_DIR` | `./uploads` | where uploaded files live |
+| `COOKIE_SECURE` | `0` | set `1` when serving over HTTPS |
+| `KALI_GEMINI_KEY` | — | Google Gemini API key (Kali is disabled without it) |
+| `MEGA_EMAIL` / `MEGA_PASSWORD` | — | MEGA account (primary cloud backup) |
 | `MEGA_FOLDER` | `send-backup` | folder name inside the MEGA drive |
-| `GITHUB_BACKUP_TOKEN` | — | classic PAT (`repo` scope) enabling the secondary GitHub backup |
-| `GITHUB_BACKUP_REPO` | — | private repo for backups, e.g. `user/send-backup` |
+| `GITHUB_BACKUP_TOKEN` / `GITHUB_BACKUP_REPO` | — | classic PAT (`repo` scope) + private repo for the secondary backup |
 
-## ✨ Features
+## ✨ Highlights
 
-### Main page (`/`)
-- Clean layout: composer first, then **search** + type filter chips
-- **ALL file types accepted** (html, exe, pdf, zip… anything). Risky types are
-  always served as forced downloads (`octet-stream` + `nosniff`), so they can
-  never execute on your site's origin
-- Upload: drag & drop, click, or **Ctrl+V paste** — up to **20 GB**, multiple files
-  at once, live progress (the server has no upload timeout)
-- **Folders**: anyone can create one with an optional password; upload while a
-  folder is open and items land inside it; move any item between folders (📁 button);
-  admins can rename/re-secure/delete any folder
-- In-browser **voice recording**, inline image/audio/video preview, copy text or
-  images to clipboard, download anything
-- Dark premium UI, fully responsive
+### 📨 File sharing (`/`)
+- Drag & drop, click, or **Ctrl+V paste** — up to **20 GB**, multiple files, live progress, no upload timeout
+- **Every type accepted** — risky types (html/svg/js…) are always served as forced downloads with `nosniff`, so they can never execute on your origin
+- **Folders** with optional passwords, admin visibility/edit rules; move items between folders with the 📁 button
+- In-browser voice recording, inline image/audio/video previews, copy-to-clipboard, search + type filters
 
-### Live streaming (`/stream`)
-- **WebRTC peer-to-peer** screen sharing — the video never touches the server
-- Host gets a share link (`/stream#code`) + an **optional stream password**
-- **Mini chat** beside the stream: host + viewers, text and images (paste too)
-- **Voice chat is a full mesh**: everyone hears everyone — viewers press 🎙️ to
-  talk (to the streamer *and* each other), the streamer presses 🎙️ to talk to all
-- **Blip-proof**: a dropped connection never kills a stream (15 s host grace +
-  automatic re-adopt; viewers silently rejoin)
-- Host preview is hidden by default to prevent the infinite-mirror effect; 👁 to peek
-- Fullscreen button for viewers; the host sees the live viewer count
-- **`/streamadmin`** (hidden): watch any stream invisibly (`(hidden)` in the host's
-  list) and force-stop any stream — password changeable from `/admin`
+### 💬 Private chat (`/private`)
+- **Kali AI bot** (Google Gemini): mention **`@kali`** anywhere, or open your private Kali room — admin-editable personality
+- Files (≤ 25 MB) + **voice notes** in-chat; every message has hover actions (✎ edit · ↩ reply · ✕ delete)
+- **Smart history**: the latest 100 load instantly; older pages stream in as you scroll up
+- **Never kicked out**: connection blips are invisible — your draft even survives a full page reload
+- Message grouping, reply quotes with jump-to-original, image lightbox, unread dots, notification sounds
+- **In-chat moderation**: private admins mute a room (🔇) or timeout any user (⏳) from any `#room` — no panel detour
 
-> **Note on screen audio**: Windows captures full-screen system sound automatically.
-> Browsers on **Linux & macOS cannot capture full-screen system audio** (a platform
-> limitation). Share a browser **tab** to include its sound, or use the host mic 🎙️ —
-> the site detects a silent share and shows a one-click fallback panel.
+### 📡 Live streaming (`/stream`)
+- **WebRTC peer-to-peer** — video never touches the server; 1080p-class capture at up to 60 fps
+- **Full-mesh voice**: press 🎙️ and everyone hears everyone — the streamer *and* the viewers
+- Password-protected streams + share links (`/stream#code` enters directly)
+- **Blip-proof**: 15 s host grace with automatic re-adopt; viewers silently rejoin — a network blip never kills a stream
+- Host preview hidden by default (no infinite mirror), fullscreen, live viewer list with watching-now dots, client-side recording
 
-### Private chat (`/private`)
-- Public room + private rooms (create or join by code, share `/private#roomcode`)
-- **Kali AI bot** (Google Gemini, `gemini-flash-lite-latest`): mention **`@kali`**
-  in any room, or open the private **Kali** room where it replies to everything.
-  Admin-editable personality and on/off toggle from `/admin`
-- **Files + voice notes**: the **＋** button sends any file (≤ 25 MB), 🎙️ records a
-  voice note in-chat; every message type has hover actions (edit ✎, reply ↩, delete ✕)
-- Instant **editing**, **replies with quotes**, image lightbox, unread dots
-- **Smart history**: only the latest 100 messages load; older pages stream in as
-  you scroll up (no more hanging on huge rooms)
-- **Message grouping**: consecutive messages in the same minute stack with one
-  name and one time
-- **Never kicked out**: connection blips are invisible — your typed draft even
-  survives a full page reload (per-room autosave)
-- Anonymous-friendly: pick a display name on first visit, change it anytime
+### 🛡️ Hidden panels & moderation
+- `/admin` — stat cards, cloud-backup status, per-IP visitor cards, activity log with search, recycle bin, every password changeable
+- `/privateadmin` — every room with live counts + visitor history (with IP), stealth presence, delete messages/rooms, mutes & timeouts
+- `/streamadmin` — watch any stream invisibly (the host sees only `(hidden)`), force-stop any stream
+- `/superadmin` — ban any IP temporarily or permanently; enforced on **every route and socket**; the panel itself survives self-bans
 
-### Memory archive
-Deleted chat messages are **archived forever**: hidden on the site, but kept in the
-MEGA + GitHub backups (marked `deleted:true` in `chats.json`).
+## 🔒 Security posture
 
-### Admin panel (`/admin`)
-- Password-protected (scrypt-hashed on disk, brute-force lockout 5 tries/15 min)
-- **Overview**: stat cards, cloud-backup status (MEGA + GitHub), AI stats, top visitors
-- **Visitors**: clean per-IP summary cards — visits, uploads, chats, downloads,
-  device type, first/last seen, online-now badge — sortable + searchable
-- **Activity** log with search + category chips; session-based visit logging
-  (one entry per visitor per 30 min, not per request)
-- **All items** overview, **recycle bin** (restore/purge)
-- Change every password: admin, private-admin, stream-admin
-
-### Private admin (`/privateadmin`)
-- See every room with live counts, everyone who ever entered (with IP), who's online
-- Invisible (stealth) presence in any room; delete any message/room
-- The public chat can never be deleted
+- Passwords **scrypt-hashed** on disk; every compare timing-safe (`crypto.timingSafeEqual`)
+- **Brute-force lockout** (5 attempts / 15 min) on every login — HTTP **and** sockets
+- Panel passwords travel in the `x-pw` **header**, never in URLs
+- Risky uploads forced-download + `nosniff`; Arabic filenames healed (RFC 5987 downloads)
+- IP-ban system with spoof-resistant logging (`CF-Connecting-IP` aware); soft-deleted chats are archived forever, never removed
+- Restore-on-empty: the ephemeral instance rebuilds itself from the MEGA + GitHub backups on boot
 
 ## ☁️ Cloud backup (MEGA primary + GitHub secondary)
-Local files stay authoritative; the backup is read only when the instance boots
-with **empty local data** (e.g. after a redeploy on an ephemeral free tier) —
-then everything restores automatically.
 
-- **MEGA** (`MEGA_EMAIL`/`MEGA_PASSWORD`): real-time mirror — `data/` + `uploads/`
-  (≤ 500 MB per file); deletions propagate (except archived chat messages)
-- **GitHub** (`GITHUB_BACKUP_TOKEN`/`GITHUB_BACKUP_REPO`): same data to a private
-  repo (≤ 100 MB per file) as an extra safety net
+Local files stay authoritative. The backup is read only when the instance boots with **empty local data** (e.g. after a redeploy on an ephemeral free tier) — then everything restores automatically.
 
-## 🚀 Deploy to the internet
+- **MEGA** — real-time mirror of `data/` + `uploads/` (≤ 500 MB per file)
+- **GitHub** — the same data to a private repo (≤ 100 MB per file) as a second safety net
 
-### Option A — Railway / Render / Fly.io (easiest, Docker-based)
-1. Push this folder to a GitHub repo (a `Dockerfile` is included).
-2. Create a new project from the repo.
-3. Add two **persistent volumes**: `/app/data` and `/app/uploads`.
-4. Set env vars (`ADMIN_PASSWORD`, `COOKIE_SECURE=1`, backup creds…).
-5. Deploy and attach your own domain.
+## ☁️ Deploy to the internet
+
+### Option A — Render / Railway / Fly.io (easiest — Docker included)
+1. Push this repo, create a service from it (auto-deploys on push).
+2. Attach **persistent volumes**: `/app/data` and `/app/uploads` — or rely on the cloud-backup restore.
+3. Set the env vars (`ADMIN_PASSWORD`, `COOKIE_SECURE=1`, backup creds…), deploy, attach your domain.
 
 ### Option B — VPS + nginx + systemd (full control)
-1. Ubuntu VPS; install Node 20+ and nginx.
-2. Copy this folder to `/opt/send`, then:
-   ```bash
-   sudo cp /opt/send/deploy/send.service /etc/systemd/system/
-   sudo nano /etc/systemd/system/send.service   # set ADMIN_PASSWORD
-   sudo systemctl enable --now send
-   sudo cp /opt/send/deploy/nginx.example.conf /etc/nginx/sites-available/send.conf
-   sudo ln -s /etc/nginx/sites-available/send.conf /etc/nginx/sites-enabled/
-   sudo certbot --nginx -d send.com   # free HTTPS
-   ```
-3. Point the domain's A record at the VPS.
+```bash
+sudo cp deploy/send.service /etc/systemd/system/ && sudo nano deploy/send.service  # set ADMIN_PASSWORD
+sudo systemctl enable --now send
+sudo cp deploy/nginx.example.conf /etc/nginx/sites-available/send.conf
+sudo ln -s /etc/nginx/sites-available/send.conf /etc/nginx/sites-enabled/
+sudo certbot --nginx -d your-domain.com        # free HTTPS
+```
 
 ### Option C — Cloudflare Tunnel
-Run `cloudflared tunnel` → `http://localhost:3000` for a public URL with free HTTPS.
+`cloudflared tunnel → http://localhost:3000` — a public URL with free HTTPS, no open ports.
 
 ## 🗄 Where data lives
-- `uploads/` — every uploaded file (site items, chat files, voice notes)
-- `data/items.json` — all items (soft-deleted ones included)
-- `data/chats.json` — full chat history (deleted messages archived with `deleted:true`)
-- `data/logs.json` — activity + IP logs
-- `data/folders.json` — folders and their rules
-- `data/kali.json` — Kali AI personality + enabled flag
-- `data/admin.json` / `data/sessions.json` — hashed admin password / sessions
 
-Back up the whole folder; delete `data/` + `uploads/` to reset everything.
+| Path | Contents |
+|---|---|
+| `uploads/` | every uploaded file (site items, chat files, voice notes) |
+| `data/items.json` | all items (soft-deleted included → recycle bin) |
+| `data/chats.json` | live chat history (deleted messages marked, archived forever) |
+| `data/chats_archive.json` | permanent overflow archive (never in RAM, pushed to both clouds) |
+| `data/logs.json` | activity + IP log (session-based) |
+| `data/folders.json` | folders and their rules |
+| `data/bans.json` / `data/mutes.json` | IP bans / room mutes & user timeouts |
+| `data/admin.json` · `data/sessions.json` | hashed admin password · sessions |
+
+> Back up the whole folder; delete `data/` + `uploads/` to reset everything.
+
+---
+
+<div align="center">
+
+👑 **With the code of Qai9rr**
+
+*Send — dark, fast, self-hosted.*
+
+</div>
