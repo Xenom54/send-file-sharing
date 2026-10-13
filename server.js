@@ -1307,6 +1307,10 @@ function panelLoginBlocked(req, res) {
 /* Kali rate limit: one Gemini call per user every 8s (protects the API quota
    from mention-spam; the bot simply stays quiet for over-eager users)      */
 const kaliLastCall = new Map();
+const kaliPending = new Map(); // ai-room → latest message written while Kali was busy (coalesced)
+const kaliTimers = new Map();  // key → scheduled delivery timer (fires when the gap closes)
+const KALI_GAP = 3000;         // min ms between Kali replies per user (pacing, not a wall)
+const kaliClean = s => String(s || '').replace(/@(kali|ai)\b/gi, '').trim();
 function maybeKaliReply(room, userName, text, reqLike, uid) {
   const isKaliRoom = room && room.startsWith('ai-');
   const mentioned = /@(kali|ai)\b/i.test(String(text || ''));
@@ -1316,24 +1320,63 @@ function maybeKaliReply(room, userName, text, reqLike, uid) {
   const key = (String(uid || '').slice(0, 64) || clientIp(reqLike) || 'x') + '|' + (isKaliRoom ? 'ai' : 'mention');
   const now = Date.now();
   const last = kaliLastCall.get(key) || 0;
-  if (now - last < 8000) return; // throttled
+  if (now - last < KALI_GAP) {
+    // ai- rooms: NEVER leave a message unanswered — queue the latest and
+    // schedule its delivery the moment the pacing gap closes. If a reply is
+    // already in flight, its completion consumes the queue first; either way
+    // the user gets an answer (no silent drops = no "Kali hangs").
+    if (isKaliRoom) {
+      kaliPending.set(room, { text: String(text || ''), name: userName });
+      if (kaliPending.size > 200) kaliPending.clear();
+      if (!kaliTimers.has(key)) {
+        const wait = Math.max(50, KALI_GAP - (now - last));
+        const t = setTimeout(() => {
+          kaliTimers.delete(key);
+          const p = kaliPending.get(room);
+          if (!p) return;
+          kaliPending.delete(room);
+          kaliLastCall.set(key, Date.now());
+          runKali(room, p.name, kaliClean(p.text), key, uid, reqLike);
+        }, wait);
+        kaliTimers.set(key, t);
+      }
+    }
+    return;
+  }
   if (kaliLastCall.size > 500) kaliLastCall.clear();
   kaliLastCall.set(key, now);
-  const prompt = String(text || '').replace(/@(kali|ai)\b/gi, '').trim();
+  runKali(room, userName, kaliClean(text), key, uid, reqLike);
+}
 
-  // short natural delay, then ask Gemini with the room's recent context
+/* Kali's reply lifecycle — the room sees "Kali is typing…" the whole time
+   (no dead silence), the answer lands as fast as Gemini (or the fallback)
+   allows, and any coalesced follow-up is answered immediately after.      */
+function runKali(room, userName, prompt, key, uid, reqLike) {
+  io.to(room).emit('typing', { name: 'Kali', typing: true });
   setTimeout(async () => {
+    let replyText = null;
     try {
       const history = (chats[room] || []).slice(-10).map(m => ({ name: m.name, text: m.text, bot: !!m.bot }));
-      const text = await kali.reply(prompt, userName, history);
-      if (!text) return; // bot disabled by admin
-      const msg = { ts: Date.now(), name: 'Kali', text: String(text).slice(0, 1500), id: newId(), uid: 'bot', bot: true };
+      replyText = await kali.reply(prompt, userName, history);
+    } catch (e) { console.error('[kali] reply failed', e.message); }
+    io.to(room).emit('typing', { name: 'Kali', typing: false });
+    if (replyText) {
+      const msg = { ts: Date.now(), name: 'Kali', text: String(replyText).slice(0, 1500), id: newId(), uid: 'bot', bot: true };
       saveChat(room, msg);
       io.to(room).emit('msg', msg);
       if (room === 'public') io.emit('public_activity', { room });
       log('ai_msg', `room=${room}`, reqLike);
-    } catch (e) { console.error('[kali] reply failed', e.message); }
-  }, 400 + Math.floor(Math.random() * 500));
+    }
+    // coalesced follow-up: answer the latest message that arrived while busy
+    const p = kaliPending.get(room);
+    if (p) {
+      kaliPending.delete(room);
+      setTimeout(() => {
+        kaliLastCall.set(key, Date.now());
+        runKali(room, p.name, kaliClean(p.text), key, uid, reqLike);
+      }, 350);
+    }
+  }, 350 + Math.floor(Math.random() * 300));
 }
 
 /* ============================ STREAMS (WebRTC) ============================

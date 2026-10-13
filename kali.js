@@ -84,7 +84,7 @@ async function gemini(history, prompt) {
       contents,
       generationConfig: { temperature: 0.9, maxOutputTokens: 200 },
     }),
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(12000), // snappier fallback: Gemini p95 lands well inside this
   });
   if (!res.ok) return null;
   const d = await res.json();
