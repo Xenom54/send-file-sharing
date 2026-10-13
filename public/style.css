@@ -29,15 +29,15 @@ body.chat-mode .navbar { flex: none; }
 body.chat-mode .wrap {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column;
-  padding-top: 12px; padding-bottom: 12px;
-  max-width: min(1760px, 97vw); /* the chat fills the screen — as big as possible */
+  padding-top: 10px; padding-bottom: 10px;
+  max-width: none; padding-left: 10px; padding-right: 10px; /* the chat fills the whole window */
 }
 body.chat-mode #chatWrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 body.chat-mode .chat-app { flex: 1; min-height: 0; height: auto; }
 @media (max-width: 900px) {
   /* small screens keep the normal page scroll (panel stacks above the chat) */
   body.chat-mode { overflow: auto; height: auto; display: block; }
-  body.chat-mode .chat-app { height: 82vh; min-height: 520px; }
+  body.chat-mode .chat-app { height: 88vh; min-height: 540px; }
 }
 
 :root {
@@ -557,7 +557,7 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 
 /* --------------------------------- chat ---------------------------------- */
 /* bigger chat: taller area, wider bubbles, compact 240px collapsible panel */
-.chat-app { display: grid; grid-template-columns: 240px 1fr; gap: 14px; height: 82vh; min-height: 560px; }
+.chat-app { display: grid; grid-template-columns: 220px 1fr; gap: 12px; height: 82vh; min-height: 560px; }
 .panel { padding: 14px; display: flex; flex-direction: column; }
 .panel .ph { font-size: .68rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 13px; display: flex; align-items: center; gap: 6px; }
 .panel .ph .panel-toggle { margin-left: auto; background: none; border: none; color: var(--text-3); cursor: pointer; font-size: .78rem; padding: 2px 6px; border-radius: 6px; }
@@ -591,20 +591,19 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .chat-header .hash { color: var(--text-3); font-family: var(--mono); }
 .chat-header .room-title { font-weight: 800; font-family: var(--mono); letter-spacing: -.01em; }
 .chat-header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-/* FIXED-SIZE message rectangles: every bubble spans the FULL messages area —
-   the chat box never changes size with any message's length. scrollbar-gutter
-   keeps the width constant even when the scrollbar appears/disappears.       */
-.messages { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 20px; display: flex; flex-direction: column; gap: 9px; }
-.msg { display: flex; flex-direction: column; width: 100%; gap: 4px; animation: pop .24s cubic-bezier(.2, .8, .2, 1) backwards; }
+/* classic messenger alignment: THEIR bubbles on the LEFT, MINE on the RIGHT,
+   content-fitted with a generous cap — the chat BOX itself stays big and fixed
+   (scrollbar-gutter keeps its width constant when the scrollbar appears).     */
+.messages { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.msg { display: flex; flex-direction: column; max-width: min(78%, 720px); gap: 4px; animation: pop .24s cubic-bezier(.2, .8, .2, 1) backwards; }
 .msg .who { font-size: .7rem; color: var(--text-3); font-weight: 700; padding-left: 3px; }
 /* grouped messages: name hidden (shown once per burst), tighter spacing */
 .msg.msg-grouped { margin-top: -5px; }
 .msg .bubble {
   background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 14px 14px 14px 4px;
-  padding: 9px 13px; font-size: .9rem; line-height: 1.5; word-break: break-word; white-space: pre-wrap;
+  padding: 8px 12px; font-size: .85rem; line-height: 1.45; word-break: break-word; white-space: pre-wrap;
 }
-.msg.mine { align-self: stretch; align-items: stretch; }
-.msg.mine .who, .msg.mine .time { text-align: right; }
+.msg.mine { align-self: flex-end; align-items: flex-end; }
 .msg.mine .bubble {
   background: var(--grad-soft);
   border-color: rgba(124, 108, 255, .42); border-radius: 14px 14px 4px 14px;
@@ -897,6 +896,7 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
   .chat-app { grid-template-columns: 1fr; height: auto; min-height: 0; }
   .panel { order: 2; }
   .chat-main { order: 1; min-height: 66vh; }
+  .msg { max-width: 86%; } /* phones: a bit more bubble width */
   .navbar-inner { padding: 11px 16px; gap: 10px; }
   .wrap { padding: 20px 16px 70px; }
   .grid { grid-template-columns: 1fr; }
