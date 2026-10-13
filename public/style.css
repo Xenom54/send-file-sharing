@@ -34,6 +34,11 @@ body.chat-mode .wrap {
 }
 body.chat-mode #chatWrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 body.chat-mode .chat-app { flex: 1; min-height: 0; height: auto; }
+/* the chat wrap is ALWAYS full-bleed — even before the chat-mode class lands,
+   so the rectangle covers the whole window edge to edge (#chatWrap only
+   exists on /private, so no other page is affected) */
+#chatWrap { max-width: none; padding-left: 10px; padding-right: 10px; }
+body.chat-mode .navbar-inner { max-width: none; padding-left: 22px; padding-right: 22px; }
 @media (max-width: 900px) {
   /* small screens keep the normal page scroll (panel stacks above the chat) */
   body.chat-mode { overflow: auto; height: auto; display: block; }
@@ -595,7 +600,11 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
    content-fitted with a generous cap — the chat BOX itself stays big and fixed
    (scrollbar-gutter keeps its width constant when the scrollbar appears).     */
 .messages { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
-.msg { display: flex; flex-direction: column; max-width: min(78%, 720px); gap: 4px; animation: pop .24s cubic-bezier(.2, .8, .2, 1) backwards; }
+/* classic messenger alignment: THEIR bubbles on the LEFT, MINE on the RIGHT.
+   align-self: flex-start is ESSENTIAL — without it the flex column stretches
+   every .msg to the container width (a 3-letter message rendered as a 720px
+   box). shrink-to-fit + generous cap keeps bubbles hugging their text.        */
+.msg { display: flex; flex-direction: column; align-self: flex-start; max-width: min(78%, 720px); gap: 4px; animation: pop .24s cubic-bezier(.2, .8, .2, 1) backwards; }
 .msg .who { font-size: .7rem; color: var(--text-3); font-weight: 700; padding-left: 3px; }
 /* grouped messages: name hidden (shown once per burst), tighter spacing */
 .msg.msg-grouped { margin-top: -5px; }
