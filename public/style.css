@@ -36,8 +36,9 @@ body.chat-mode #chatWrap { flex: 1; min-height: 0; display: flex; flex-direction
 body.chat-mode .chat-app { flex: 1; min-height: 0; height: auto; }
 /* the chat wrap is ALWAYS full-bleed — even before the chat-mode class lands,
    so the rectangle covers the whole window edge to edge (#chatWrap only
-   exists on /private, so no other page is affected) */
-#chatWrap { max-width: none; padding-left: 10px; padding-right: 10px; }
+   exists on /private, so no other page is affected). !important guards
+   against any stale/overriding rule ever centering it again. */
+#chatWrap { max-width: none !important; width: 100% !important; padding-left: 10px !important; padding-right: 10px !important; }
 body.chat-mode .navbar-inner { max-width: none; padding-left: 22px; padding-right: 22px; }
 @media (max-width: 900px) {
   /* small screens keep the normal page scroll (panel stacks above the chat) */
