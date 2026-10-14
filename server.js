@@ -1357,7 +1357,9 @@ function runKali(room, userName, prompt, key, uid, reqLike) {
     let replyText = null;
     try {
       const history = (chats[room] || []).slice(-10).map(m => ({ name: m.name, text: m.text, bot: !!m.bot }));
-      replyText = await kali.reply(prompt, userName, history);
+      const out = await kali.reply(prompt, userName, history);
+      if (out && out.flagged) log('kali_injection', `room=${room} (persona/abuse attempt neutralized)`, reqLike);
+      replyText = out && out.text;
     } catch (e) { console.error('[kali] reply failed', e.message); }
     io.to(room).emit('typing', { name: 'Kali', typing: false });
     if (replyText) {
