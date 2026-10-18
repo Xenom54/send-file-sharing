@@ -389,6 +389,13 @@ label.fl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: 
 .item { padding: 17px; display: flex; flex-direction: column; gap: 13px; position: relative; animation: pop .34s cubic-bezier(.2, .8, .2, 1) backwards; }
 @keyframes pop { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
 
+/* who posted this item (shown above the card content) */
+.item-byline {
+  font-size: .72rem; color: var(--text-3); font-weight: 700;
+  display: flex; align-items: center; gap: 5px;
+  padding-bottom: 2px; border-bottom: 1px dashed var(--border); margin-bottom: -4px;
+}
+
 .item .meta { display: flex; align-items: center; gap: 9px; font-size: .75rem; color: var(--text-3); font-weight: 600; flex-wrap: wrap; }
 .badge {
   display: inline-flex; align-items: center; gap: 5px;

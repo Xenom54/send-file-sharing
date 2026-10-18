@@ -39,6 +39,15 @@ async function copyImage(url) {
 let isAdmin = false;
 fetch('/api/admin/status').then(r => r.json()).then(d => { isAdmin = !!d.authorized; render(); }).catch(() => {});
 
+/* my device identity: items I create carry it, so I can edit/delete my own
+   (matched server-side via the x-item-uid header — never exposed in URLs)   */
+const myUid = (() => {
+  let u = localStorage.getItem('send_uid');
+  if (!u) { u = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('send_uid', u); }
+  return u;
+})();
+const ownerHeaders = () => ({ 'x-item-uid': myUid });
+
 /* --------------------------------- tabs ---------------------------------- */
 $$('#composerTabs .tab').forEach(t => t.addEventListener('click', () => {
   $$('#composerTabs .tab').forEach(x => x.classList.toggle('active', x === t));
@@ -98,15 +107,18 @@ function itemHTML(it, i) {
   }
 
   let actions = '';
+  const mine = !!it.uid && it.uid === myUid;
+  const canManage = isAdmin || mine;
   if (it.type === 'text') actions += `<button class="btn small" data-copy-text="${esc(it.text)}">⧉ Copy</button>`;
   if (it.type === 'image') actions += `<button class="btn small" data-copy-img="${url}">⧉ Copy image</button>`;
   actions += `<a class="btn small" href="${url}?download=1" download>⬇ Download${it.downloads ? ` · ${it.downloads}` : ''}</a>`;
   actions += `<button class="btn small" data-move-item="${it.id}" title="Move to folder">📁</button>`;
-  actions += `<button class="btn small" data-rename-item="${it.id}" title="Rename">🏷</button>`;
-  actions += `<button class="btn small danger" data-del="${it.id}" title="Delete">🗑</button>`;
-  if (it.type === 'text') actions += `<button class="btn small" data-edit-item="${it.id}" title="Edit">✎</button>`;
+  if (canManage) actions += `<button class="btn small" data-rename-item="${it.id}" title="Rename">🏷</button>`;
+  if (canManage) actions += `<button class="btn small danger" data-del="${it.id}" title="Delete">🗑</button>`;
+  if (canManage && it.type === 'text') actions += `<button class="btn small" data-edit-item="${it.id}" title="Edit">✎</button>`;
 
   return `<div class="card item hoverable" id="item-${it.id}" style="animation-delay:${Math.min(i * 45, 400)}ms">
+    ${it.ownerName ? `<div class="item-byline" title="Posted by">👤 ${esc(it.ownerName)}</div>` : ''}
     <div class="meta"><span class="badge ${it.type}">${it.type}</span><span>${esc(fmtTime(it.createdAt))}</span>${it.size ? `<span>· ${fmtSize(it.size)}</span>` : ''}${it.folder ? `<span class="pill">📁 ${esc(it.folder)}</span>` : ''}</div>
     ${it.title ? `<h3 dir="auto">${esc(it.title)}</h3>` : ''}
     ${body}
@@ -180,8 +192,20 @@ $('#lightbox').addEventListener('click', () => $('#lightbox').classList.remove('
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#lightbox').classList.remove('open'); $('#editModal').classList.remove('open'); } });
 
 async function delItem(id) {
+  const it = findItemAnywhere(id) || items.find(x => x.id === id) || null;
+  const mine = it && it.uid && it.uid === myUid;
   if (isAdmin) return doDelete(id);
-  // not logged in as admin → ask for the admin password in a modal
+  if (mine) {
+    // my own item: delete directly with my device identity — no admin password
+    if (!confirm('Delete this item? It goes to the recycle bin.')) return;
+    try {
+      const r = await fetch('/api/items/' + id, { method: 'DELETE', headers: ownerHeaders() });
+      if (r.ok) { toast('🗑 Moved to recycle bin'); if (activeFolder) loadFolderItems(activeFolder); else load(); }
+      else toast('⚠ Delete failed', 'err');
+    } catch { toast('⚠ Delete failed', 'err'); }
+    return;
+  }
+  // neither admin nor owner → ask for the admin password in a modal
   openDelModal(id);
 }
 
@@ -249,8 +273,8 @@ $('#btnSendText').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = 'Sending…';
   try {
     const r = await fetch('/api/items/text', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, text, folder: activeFolder || undefined }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+      body: JSON.stringify({ title, text, folder: activeFolder || undefined, uid: myUid, ownerName: Profile.get() || 'guest' }),
     });
     if (r.ok) {
       $('#textTitle').value = ''; $('#textBody').value = '';
@@ -273,8 +297,41 @@ fileInput.addEventListener('change', () => { uploadFiles(fileInput.files); fileI
 document.addEventListener('paste', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   const files = [...(e.clipboardData?.files || [])];
-  if (files.length) { e.preventDefault(); uploadFiles(files); toast('📎 Pasting pasted file(s)…'); }
+  if (!files.length) return;
+  e.preventDefault();
+  // images get a title FIRST (the user names them before they go up);
+  // other pasted files upload straight away as before
+  const images = files.filter(f => f.type.startsWith('image/'));
+  const others = files.filter(f => !f.type.startsWith('image/'));
+  if (others.length) { uploadFiles(others); toast('📎 Pasting pasted file(s)…'); }
+  if (images.length) openPasteTitleModal(images);
 });
+
+/* pasted-image title modal: name it, then send (or cancel to discard) */
+const pasteQueue = [];
+function openPasteTitleModal(files) {
+  pasteQueue.push(...files);
+  if (!$('#pasteTitleModal').classList.contains('open')) nextPaste();
+}
+function nextPaste() {
+  const f = pasteQueue.shift();
+  if (!f) return;
+  $('#pastePreview').src = URL.createObjectURL(f);
+  $('#pasteTitleInput').value = '';
+  $('#pasteTitleModal').classList.add('open');
+  setTimeout(() => $('#pasteTitleInput').focus(), 60);
+  $('#pasteSend').onclick = () => {
+    const title = $('#pasteTitleInput').value.trim();
+    $('#pasteTitleModal').classList.remove('open');
+    toast('📎 Uploading pasted image…');
+    uploadOne(f, title || undefined);
+    nextPaste();
+  };
+  $('#pasteCancel').onclick = () => {
+    $('#pasteTitleModal').classList.remove('open');
+    nextPaste();
+  };
+}
 
 function uploadFiles(fileList) {
   const files = [...fileList];
@@ -282,7 +339,7 @@ function uploadFiles(fileList) {
   files.forEach(uploadOne);
 }
 
-function uploadOne(file) {
+function uploadOne(file, titleOverride) {
   const row = document.createElement('div');
   row.className = 'card item';
   row.style.marginTop = '14px';
@@ -294,7 +351,9 @@ function uploadOne(file) {
 
   const fd = new FormData();
   fd.append('file', file);
-  fd.append('title', $('#fileTitle').value.trim() || file.name);
+  fd.append('title', titleOverride ?? ($('#fileTitle').value.trim() || file.name));
+  fd.append('uid', myUid);
+  fd.append('ownerName', Profile.get() || 'guest');
   if (activeFolder) fd.append('folder', activeFolder);
 
   const xhr = new XMLHttpRequest();
@@ -399,6 +458,8 @@ async function saveRec() {
   const ext = (recBlob.type.includes('mp4') ? 'm4a' : recBlob.type.includes('ogg') ? 'ogg' : 'webm');
   const fd = new FormData();
   fd.append('audio', recBlob, `recording-${Date.now()}.${ext}`);
+  fd.append('uid', myUid);
+  fd.append('ownerName', Profile.get() || 'guest');
   if (activeFolder) fd.append('folder', activeFolder);
   try {
     const r = await fetch('/api/items/audio', { method: 'POST', body: fd });
@@ -454,7 +515,7 @@ $('#editSave').addEventListener('click', async () => {
     }
     const r = await fetch('/api/items/' + editingId + '/text', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-item-uid': myUid },
       body: JSON.stringify({ title: $('#editTitle').value, text: $('#editText').value }),
     });
     if (r.ok) {
@@ -786,7 +847,7 @@ $('#renameSave').addEventListener('click', async () => {
   btn.disabled = true;
   try {
     const r = await fetch('/api/items/' + renamingId + '/rename', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-item-uid': myUid }, body: JSON.stringify({ title }),
     });
     if (r.ok) {
       toast('✓ Renamed');

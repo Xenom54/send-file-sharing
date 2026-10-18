@@ -300,6 +300,7 @@ function publicItem(it) {
     originalName: fixUploadName(it.originalName), mime: it.mime, size: it.size,
     createdAt: it.createdAt, downloads: it.downloads || 0,
     folder: it.folder || null, edited: !!it.edited,
+    uid: it.uid || null, ownerName: it.ownerName || null,
   };
 }
 
@@ -551,7 +552,10 @@ app.post('/api/items/text', (req, res) => {
   const title = String(req.body.title || '').slice(0, 200);
   const text = String(req.body.text || '').slice(0, 100000);
   if (!text.trim() && !title.trim()) return res.status(400).json({ error: 'empty' });
-  const it = { id: newId(), type: 'text', title, text, createdAt: Date.now(), ip: req.ip, downloads: 0, deleted: false };
+  const it = {
+    id: newId(), type: 'text', title, text, createdAt: Date.now(), ip: req.ip, downloads: 0, deleted: false,
+    uid: String(req.body?.uid || '').slice(0, 64), ownerName: String(req.body?.ownerName || '').slice(0, 30),
+  };
   if (req.body.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
   io.emit('site_activity', { kind: 'upload' });
@@ -576,6 +580,8 @@ app.post('/api/items/upload', uploadRateLimited, upload.single('file'), (req, re
     ip: req.ip,
     downloads: 0,
     deleted: false,
+    uid: String(req.body?.uid || '').slice(0, 64),
+    ownerName: String(req.body?.ownerName || '').slice(0, 30),
   };
   if (req.body.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
@@ -599,6 +605,8 @@ app.post('/api/items/audio', uploadRateLimited, upload.single('audio'), (req, re
     ip: req.ip,
     downloads: 0,
     deleted: false,
+    uid: String(req.body?.uid || '').slice(0, 64),
+    ownerName: String(req.body?.ownerName || '').slice(0, 30),
   };
   if (req.body?.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
@@ -608,11 +616,20 @@ app.post('/api/items/audio', uploadRateLimited, upload.single('audio'), (req, re
   res.json(publicItem(it));
 });
 
-app.delete('/api/items/:id', requireAdmin, (req, res) => {
+/* item ownership (v3.30.0): the creator (matched by their device uid, sent in
+   the x-item-uid header) can edit/delete their own items — admins can do all. */
+function itemOwnerOk(req, it) {
+  const claimed = String(req.headers['x-item-uid'] || '');
+  return claimed !== '' && String(it.uid || '') === claimed;
+}
+
+app.delete('/api/items/:id', async (req, res) => {
   const it = items.find(i => i.id === req.params.id);
   if (!it) return res.status(404).json({ error: 'not found' });
+  const isAdmin = isAuthorized(req);
+  if (!isAdmin && !itemOwnerOk(req, it)) return res.status(401).json({ error: 'only the owner or an admin can delete this item' });
   it.deleted = true; it.deletedAt = Date.now(); saveItems();
-  log('delete', `${it.type}: ${it.title}`, req);
+  log(isAdmin ? 'delete' : 'delete_own', `${it.type}: ${it.title} (by owner)`, req);
   res.json({ ok: true });
 });
 
@@ -940,9 +957,10 @@ app.put('/api/items/:id/folder', async (req, res) => {
 });
 
 /* rename any item (admin) */
-app.put('/api/items/:id/rename', requireAdmin, (req, res) => {
+app.put('/api/items/:id/rename', async (req, res) => {
   const it = items.find(i => i.id === req.params.id);
   if (!it) return res.status(404).json({ error: 'not found' });
+  if (!isAuthorized(req) && !itemOwnerOk(req, it)) return res.status(401).json({ error: 'only the owner or an admin can rename this item' });
   const title = String(req.body?.title || '').slice(0, 200);
   if (!title.trim()) return res.status(400).json({ error: 'empty title' });
   it.title = title;
@@ -1012,11 +1030,12 @@ app.post('/api/admin/kali-config', requireAdmin, (req, res) => {
   res.json(next);
 });
 
-/* edit a text item's title/text */
-app.put('/api/items/:id/text', requireAdmin, (req, res) => {
+/* edit a text item's title/text (owner or admin) */
+app.put('/api/items/:id/text', async (req, res) => {
   const it = items.find(i => i.id === req.params.id);
   if (!it) return res.status(404).json({ error: 'not found' });
   if (it.type !== 'text') return res.status(400).json({ error: 'only text items can be edited' });
+  if (!isAuthorized(req) && !itemOwnerOk(req, it)) return res.status(401).json({ error: 'only the owner or an admin can edit this item' });
   const title = String(req.body?.title || '').slice(0, 200);
   const text = String(req.body?.text || '').slice(0, 100000);
   if (!title.trim() && !text.trim()) return res.status(400).json({ error: 'empty' });
