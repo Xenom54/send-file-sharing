@@ -48,6 +48,69 @@ const myUid = (() => {
 })();
 const ownerHeaders = () => ({ 'x-item-uid': myUid });
 
+/* ---------- chat-style voice player (same look as /private) ---------- */
+const vmAudios = new WeakMap();
+function vmFmt(s) { if (!isFinite(s)) return '0:00'; s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function stopOtherVm(except) {
+  document.querySelectorAll('.voice-msg.playing').forEach(el => {
+    if (el === except) return;
+    const a = vmAudios.get(el);
+    if (a) { try { a.pause(); } catch {} }
+    el.classList.remove('playing');
+    const b = el.querySelector('.vm-play'); if (b) b.textContent = '▶';
+  });
+}
+function buildVoicePlayer(src) {
+  const el = document.createElement('div');
+  el.className = 'voice-msg';
+  el.innerHTML = `<button class="vm-play" title="Play">▶</button>
+    <div class="vm-wave" title="Click to seek"><i></i></div>
+    <span class="vm-dur">0:00</span>`;
+  hydrateVoicePlayer(el, src);
+  return el;
+}
+function hydrateVoicePlayer(el, src) {
+  if (vmAudios.has(el)) return;
+  const a = new Audio(src);
+  a.preload = 'metadata';
+  vmAudios.set(el, a);
+  const dur = el.querySelector('.vm-dur');
+  const fill = el.querySelector('.vm-wave > i');
+  const btn = el.querySelector('.vm-play');
+  // MediaRecorder blobs often report Infinity — force the browser to compute the duration
+  a.addEventListener('loadedmetadata', () => {
+    if (isFinite(a.duration)) { dur.textContent = vmFmt(a.duration); return; }
+    a.currentTime = 1e7;
+    a.addEventListener('seeked', function once() { a.removeEventListener('seeked', once); dur.textContent = vmFmt(a.duration); });
+  });
+  a.addEventListener('timeupdate', () => {
+    if (a.duration && isFinite(a.duration)) {
+      fill.style.width = (a.currentTime / a.duration * 100) + '%';
+      dur.textContent = vmFmt(a.currentTime);
+    }
+  });
+  a.addEventListener('ended', () => { el.classList.remove('playing'); btn.textContent = '▶'; });
+  btn.addEventListener('click', () => {
+    if (a.paused) {
+      stopOtherVm(el);
+      a.play().then(() => { el.classList.add('playing'); btn.textContent = '❚❚'; }).catch(() => toast('⚠ Cannot play this audio', 'err'));
+    } else { a.pause(); el.classList.remove('playing'); btn.textContent = '▶'; }
+  });
+  el.querySelector('.vm-wave').addEventListener('click', e => {
+    if (!a.duration || !isFinite(a.duration)) return;
+    const rect = el.querySelector('.vm-wave').getBoundingClientRect();
+    const x = (e.clientX !== undefined ? e.clientX : rect.left) - rect.left;
+    a.currentTime = Math.min(Math.max(0, x / rect.width), 1) * a.duration;
+  });
+}
+/* replace [data-voice-src] placeholders with real players (after any render) */
+function hydrateVoices(root) {
+  (root || document).querySelectorAll('.voice-holder[data-voice-src]').forEach(holder => {
+    const el = buildVoicePlayer(holder.dataset.voiceSrc);
+    holder.replaceWith(el);
+  });
+}
+
 /* --------------------------------- tabs ---------------------------------- */
 $$('#composerTabs .tab').forEach(t => t.addEventListener('click', () => {
   $$('#composerTabs .tab').forEach(x => x.classList.toggle('active', x === t));
@@ -98,7 +161,7 @@ function itemHTML(it, i) {
   } else if (it.type === 'image') {
     body = `<img loading="lazy" src="${url}" alt="${esc(it.title)}" data-full="${url}" class="zoomable">`;
   } else if (it.type === 'audio') {
-    body = `<audio controls preload="metadata" src="${url}"></audio>`;
+    body = `<div class="voice-holder" data-voice-src="${url}"></div>`;
   } else if (it.type === 'video') {
     body = `<video controls preload="metadata" src="${url}" style="max-height:300px"></video>`;
   } else {
@@ -176,6 +239,7 @@ function render() {
     return;
   }
   host.innerHTML = filtered.map(itemHTML).join('');
+  hydrateVoices(host);
 }
 
 $('#items').addEventListener('click', e => {
@@ -314,25 +378,39 @@ function nextSend() {
   if (!it) return;
   $('#pasteModalIcon').textContent = it.icon;
   $('#pasteModalTitle').textContent = it.headerText;
+  // stop + clear the previous modal player
+  const prevBox = $('#pasteAudioPlayer');
+  if (prevBox._vmAudio) { try { prevBox._vmAudio.pause(); } catch {} prevBox._vmAudio = null; }
+  prevBox.innerHTML = '';
   if (it.preview) {
     $('#pastePreview').classList.remove('hidden');
     $('#pastePreview').src = URL.createObjectURL(it.preview);
     $('#pasteFileMeta').classList.add('hidden');
+    $('#pasteAudioPlayer').classList.add('hidden');
   } else {
     $('#pastePreview').classList.add('hidden');
     $('#pasteFileMeta').classList.remove('hidden');
     $('#pasteFileMeta').innerHTML = `📄 <b>${esc(it.file.name)}</b> · ${fmtSize(it.file.size)}`;
+    $('#pasteAudioPlayer').classList.add('hidden');
+  }
+  // audio entries get a LISTEN-BEFORE-SEND player inside the modal
+  if (it.audioUrl) {
+    $('#pasteAudioPlayer').classList.remove('hidden');
+    prevBox.appendChild(buildVoicePlayer(it.audioUrl));
+    prevBox._vmAudio = vmAudios.get(prevBox.querySelector('.voice-msg'));
   }
   $('#pasteTitleInput').value = it.defaultTitle || '';
   $('#pasteTitleModal').classList.add('open');
   setTimeout(() => $('#pasteTitleInput').focus(), 60);
   $('#pasteSend').onclick = () => {
     const title = $('#pasteTitleInput').value.trim();
+    if (prevBox._vmAudio) { try { prevBox._vmAudio.pause(); } catch {} }
     $('#pasteTitleModal').classList.remove('open');
     it.send(title || it.fallbackName || undefined);
     nextSend();
   };
   $('#pasteCancel').onclick = () => {
+    if (prevBox._vmAudio) { try { prevBox._vmAudio.pause(); } catch {} }
     $('#pasteTitleModal').classList.remove('open');
     if (it.discard) it.discard();
     nextSend();
@@ -448,20 +526,22 @@ function previewRec(mime) {
   const div = document.createElement('div');
   div.className = 'card item';
   div.innerHTML = `<div class="meta"><span class="badge audio">audio</span><span>Preview — not saved yet</span></div>
-    <audio controls src="${url}"></audio>
+    <div class="voice-holder" data-voice-src="${url}"></div>
     <div class="item-actions">
       <button class="btn small primary" id="saveRec">💾 Save recording</button>
       <button class="btn small" id="discardRec">✕ Discard</button>
     </div>`;
   host.appendChild(div);
+  hydrateVoices(host);
   $('#saveRec').addEventListener('click', () => {
   if (!recBlob) return;
   const ext = (recBlob.type.includes('mp4') ? 'm4a' : recBlob.type.includes('ogg') ? 'ogg' : 'webm');
   const f = new File([recBlob], `recording-${Date.now()}.${ext}`, { type: recBlob.type || 'audio/webm' });
   // the user names the recording BEFORE it uploads (cancel discards it)
   openSendTitle([{
-    icon: '🎙️', headerText: 'Name your recording', meta: f,
+    icon: '🎙️', headerText: 'Listen & name your recording', meta: f,
     defaultTitle: `Recording ${new Date().toLocaleString()}`,
+    audioUrl: URL.createObjectURL(recBlob),
     file: f, fallbackName: f.name,
     send: (title) => uploadRecording(f, title),
     discard: () => { $('#recList').innerHTML = ''; recBlob = null; toast('Recording discarded'); },
@@ -707,6 +787,7 @@ async function loadFolderItems(name) {
       return;
     }
     host.innerHTML = list.map((it, i) => itemHTML(it, i)).join('');
+    hydrateVoices(host);
   } catch { toast('⚠ Failed to load folder', 'err'); }
 }
 
