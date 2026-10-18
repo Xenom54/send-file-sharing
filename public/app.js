@@ -180,7 +180,7 @@ function itemHTML(it, i) {
   if (canManage) actions += `<button class="btn small danger" data-del="${it.id}" title="Delete">🗑</button>`;
   if (canManage && it.type === 'text') actions += `<button class="btn small" data-edit-item="${it.id}" title="Edit">✎</button>`;
 
-  return `<div class="card item hoverable" id="item-${it.id}" style="animation-delay:${Math.min(i * 45, 400)}ms">
+  return `<div class="card item hoverable${it.type === 'image' ? ' imgfull' : ''}" id="item-${it.id}" style="animation-delay:${Math.min(i * 45, 400)}ms">
     ${it.ownerName ? `<div class="item-byline" title="Posted by">👤 ${esc(it.ownerName)}</div>` : ''}
     <div class="meta"><span class="badge ${it.type}">${it.type}</span><span>${esc(fmtTime(it.createdAt))}</span>${it.size ? `<span>· ${fmtSize(it.size)}</span>` : ''}${it.folder ? `<span class="pill">📁 ${esc(it.folder)}</span>` : ''}</div>
     ${it.title ? `<h3 dir="auto">${esc(it.title)}</h3>` : ''}

@@ -434,7 +434,9 @@ label.fl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: 
 }
 .item .text-body::-webkit-scrollbar, .tablewrap::-webkit-scrollbar, .messages::-webkit-scrollbar { width: 9px; height: 9px; }
 .item .text-body::-webkit-scrollbar-thumb, .tablewrap::-webkit-scrollbar-thumb, .messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 99px; }
-.item img { width: 100%; border-radius: var(--r-sm); display: block; cursor: zoom-in; border: 1px solid var(--border); transition: transform .2s; }
+.item img { width: auto; max-width: 100%; border-radius: var(--r-sm); display: block; cursor: zoom-in; border: 1px solid var(--border); transition: transform .2s; margin-inline: auto; }
+.item.imgfull { grid-column: 1 / -1; } /* image items span the full row so the picture is fully readable inline */
+.item.imgfull img { max-width: min(100%, 1100px); }
 .item img:hover { transform: scale(1.015); }
 .item audio, .item video { width: 100%; border-radius: var(--r-sm); outline: none; border: 1px solid var(--border); }
 .item audio { filter: invert(0.92) hue-rotate(180deg); } /* dark-style native player */
@@ -644,7 +646,7 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
 }
 .msg .time { font-size: .66rem; color: var(--text-3); padding-right: 3px; font-family: var(--mono); }
 .msg .bubble { position: relative; }
-.chat-img { max-width: 100%; max-height: 260px; border-radius: 9px; display: block; cursor: zoom-in; border: 1px solid var(--border); margin-bottom: 4px; }
+.chat-img { max-width: 100%; max-height: min(72vh, 900px); border-radius: 9px; display: block; cursor: zoom-in; border: 1px solid var(--border); margin-bottom: 4px; }
 
 /* --------------- custom voice-note player (dark, elegant) ---------------
    play button + fake waveform bars + duration, matches the site theme   */
@@ -888,7 +890,7 @@ table.logtable { width: 100%; border-collapse: collapse; font-size: .85rem; }
   word-break: break-word; overflow-wrap: anywhere; white-space: pre-wrap; max-width: 100%;
 }
 .sc-who { font-size: .66rem; color: #93a4ff; font-weight: 700; margin-bottom: 2px; word-break: break-all; }
-.sc-img { max-width: 100%; max-height: 200px; border-radius: 7px; display: block; margin: 4px 0; }
+.sc-img { max-width: 100%; max-height: min(55vh, 700px); border-radius: 7px; display: block; margin: 4px 0; }
 .sc-input { display: flex; gap: 6px; margin-top: 10px; align-items: flex-end; }
 .sc-input input { flex: 1; min-width: 0; padding: 8px 10px; font-size: .84rem; }
 /* multiline stream-chat boxes (Shift+Enter = new line) */
