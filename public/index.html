@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07080f">
   <title>Send</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📨</text></svg>">
-  <link rel="stylesheet" href="/static/style.css?v=50">
+  <link rel="stylesheet" href="/static/style.css?v=51">
 </head>
 <body>
   <nav class="navbar">
@@ -53,12 +53,8 @@
         <div class="dropzone" id="dropzone">
           <div class="dz-icon">⬆️</div>
           <div class="dz-title">Drop files here or click to browse</div>
-          <div class="dz-hint">Any file type · up to 20 GB · multiple files at once</div>
+          <div class="dz-hint">Any file type · up to 20 GB · you'll name each file before it uploads</div>
           <input type="file" id="fileInput" multiple hidden>
-        </div>
-        <div class="mt">
-          <label class="fl">Title (optional)</label>
-          <input type="text" id="fileTitle" placeholder="File title…" dir="auto">
         </div>
         <div id="uploadQueue"></div>
       </div>
@@ -279,16 +275,17 @@
     </div>
   </div>
 
-  <!-- pasted-image title modal: name the image before it uploads -->
+  <!-- send-title modal: name an image / file / recording before it uploads -->
   <div class="lightbox" id="pasteTitleModal">
     <div class="card" style="max-width:430px;width:calc(100% - 32px);padding:26px;text-align:center">
-      <div class="lock-ic" style="margin-bottom:12px">🖼️</div>
-      <h3 style="font-size:1.05rem;font-weight:800">Title your image</h3>
+      <div class="lock-ic" id="pasteModalIcon" style="margin-bottom:12px">🖼️</div>
+      <h3 id="pasteModalTitle" style="font-size:1.05rem;font-weight:800">Title your image</h3>
       <img id="pastePreview" alt="" style="max-width:100%;max-height:180px;border-radius:10px;border:1px solid var(--border);margin:10px 0">
-      <input type="text" id="pasteTitleInput" placeholder="Image title (optional)" autocomplete="off" dir="auto" style="text-align:left">
+      <div id="pasteFileMeta" class="hidden" style="font-size:.88rem;color:var(--text-2);margin:10px 0;word-break:break-all"></div>
+      <input type="text" id="pasteTitleInput" placeholder="Title (optional)" autocomplete="off" dir="auto" style="text-align:left">
       <div style="display:flex;gap:10px;margin-top:12px">
         <button class="btn" id="pasteCancel" style="flex:1">Cancel</button>
-        <button class="btn primary" id="pasteSend" style="flex:1">Send image →</button>
+        <button class="btn primary" id="pasteSend" style="flex:1">Send →</button>
       </div>
     </div>
   </div>
@@ -296,9 +293,9 @@
   <div class="toasts" id="toasts"></div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/static/notify.js?v=50"></script>
-  <script src="/static/profile.js?v=50"></script>
-  <script src="/static/bidi.js?v=50"></script>
-  <script src="/static/app.js?v=50"></script>
+  <script src="/static/notify.js?v=51"></script>
+  <script src="/static/profile.js?v=51"></script>
+  <script src="/static/bidi.js?v=51"></script>
+  <script src="/static/app.js?v=51"></script>
 </body>
 </html>

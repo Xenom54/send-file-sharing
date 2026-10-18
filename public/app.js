@@ -299,44 +299,51 @@ document.addEventListener('paste', e => {
   const files = [...(e.clipboardData?.files || [])];
   if (!files.length) return;
   e.preventDefault();
-  // images get a title FIRST (the user names them before they go up);
-  // other pasted files upload straight away as before
-  const images = files.filter(f => f.type.startsWith('image/'));
-  const others = files.filter(f => !f.type.startsWith('image/'));
-  if (others.length) { uploadFiles(others); toast('📎 Pasting pasted file(s)…'); }
-  if (images.length) openPasteTitleModal(images);
+  // every pasted file gets a title FIRST (the user names it before it goes up)
+  openSendTitle(files.map(f => f.type.startsWith('image/')
+    ? { icon: '🖼️', headerText: 'Title your image', preview: f, defaultTitle: '', file: f, fallbackName: f.name }
+    : { icon: '📄', headerText: 'Name your file', meta: f, defaultTitle: f.name, file: f, fallbackName: f.name }));
+  if (files.length) toast('📎 Name it, then send…');
 });
 
-/* pasted-image title modal: name it, then send (or cancel to discard) */
-const pasteQueue = [];
-function openPasteTitleModal(files) {
-  pasteQueue.push(...files);
-  if (!$('#pasteTitleModal').classList.contains('open')) nextPaste();
-}
-function nextPaste() {
-  const f = pasteQueue.shift();
-  if (!f) return;
-  $('#pastePreview').src = URL.createObjectURL(f);
-  $('#pasteTitleInput').value = '';
+/* ------- send-title modal: name an image / file / recording BEFORE upload ------- */
+const sendQueue = [];
+function openSendTitle(entries) { sendQueue.push(...entries); if (!$('#pasteTitleModal').classList.contains('open')) nextSend(); }
+function nextSend() {
+  const it = sendQueue.shift();
+  if (!it) return;
+  $('#pasteModalIcon').textContent = it.icon;
+  $('#pasteModalTitle').textContent = it.headerText;
+  if (it.preview) {
+    $('#pastePreview').classList.remove('hidden');
+    $('#pastePreview').src = URL.createObjectURL(it.preview);
+    $('#pasteFileMeta').classList.add('hidden');
+  } else {
+    $('#pastePreview').classList.add('hidden');
+    $('#pasteFileMeta').classList.remove('hidden');
+    $('#pasteFileMeta').innerHTML = `📄 <b>${esc(it.file.name)}</b> · ${fmtSize(it.file.size)}`;
+  }
+  $('#pasteTitleInput').value = it.defaultTitle || '';
   $('#pasteTitleModal').classList.add('open');
   setTimeout(() => $('#pasteTitleInput').focus(), 60);
   $('#pasteSend').onclick = () => {
     const title = $('#pasteTitleInput').value.trim();
     $('#pasteTitleModal').classList.remove('open');
-    toast('📎 Uploading pasted image…');
-    uploadOne(f, title || undefined);
-    nextPaste();
+    it.send(title || it.fallbackName || undefined);
+    nextSend();
   };
   $('#pasteCancel').onclick = () => {
     $('#pasteTitleModal').classList.remove('open');
-    nextPaste();
+    if (it.discard) it.discard();
+    nextSend();
   };
 }
 
 function uploadFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
-  files.forEach(uploadOne);
+  // every file gets a title BEFORE it uploads (same flow as pasted images)
+  openSendTitle(files.map(f => ({ icon: '📄', headerText: 'Name your file', meta: f, defaultTitle: f.name, file: f, fallbackName: f.name })));
 }
 
 function uploadOne(file, titleOverride) {
@@ -351,7 +358,7 @@ function uploadOne(file, titleOverride) {
 
   const fd = new FormData();
   fd.append('file', file);
-  fd.append('title', titleOverride ?? ($('#fileTitle').value.trim() || file.name));
+  fd.append('title', titleOverride ?? file.name);
   fd.append('uid', myUid);
   fd.append('ownerName', Profile.get() || 'guest');
   if (activeFolder) fd.append('folder', activeFolder);
@@ -447,17 +454,25 @@ function previewRec(mime) {
       <button class="btn small" id="discardRec">✕ Discard</button>
     </div>`;
   host.appendChild(div);
-  $('#saveRec').addEventListener('click', saveRec);
-  $('#discardRec').addEventListener('click', () => { host.innerHTML = ''; recBlob = null; toast('Recording discarded'); });
+  $('#saveRec').addEventListener('click', () => {
+  if (!recBlob) return;
+  const ext = (recBlob.type.includes('mp4') ? 'm4a' : recBlob.type.includes('ogg') ? 'ogg' : 'webm');
+  const f = new File([recBlob], `recording-${Date.now()}.${ext}`, { type: recBlob.type || 'audio/webm' });
+  // the user names the recording BEFORE it uploads (cancel discards it)
+  openSendTitle([{
+    icon: '🎙️', headerText: 'Name your recording', meta: f,
+    defaultTitle: `Recording ${new Date().toLocaleString()}`,
+    file: f, fallbackName: f.name,
+    send: (title) => uploadRecording(f, title),
+    discard: () => { $('#recList').innerHTML = ''; recBlob = null; toast('Recording discarded'); },
+  }]);
+});
 }
 
-async function saveRec() {
-  if (!recBlob) return;
-  const btn = $('#saveRec');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  const ext = (recBlob.type.includes('mp4') ? 'm4a' : recBlob.type.includes('ogg') ? 'ogg' : 'webm');
+async function uploadRecording(f, title) {
   const fd = new FormData();
-  fd.append('audio', recBlob, `recording-${Date.now()}.${ext}`);
+  fd.append('audio', f, f.name);
+  fd.append('title', title || f.name);
   fd.append('uid', myUid);
   fd.append('ownerName', Profile.get() || 'guest');
   if (activeFolder) fd.append('folder', activeFolder);
@@ -470,7 +485,6 @@ async function saveRec() {
     }
     else toast('⚠ Failed to save recording', 'err');
   } catch { toast('⚠ Failed to save recording', 'err'); }
-  btn.disabled = false; btn.textContent = '💾 Save recording';
 }
 
 /* ------------------------- edit text items (admin) ------------------------- */
