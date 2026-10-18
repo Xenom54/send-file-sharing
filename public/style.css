@@ -88,6 +88,22 @@ body.chat-mode .navbar-inner { max-width: none; padding-left: 22px; padding-righ
 
 ::selection { background: rgba(124, 108, 255, .35); color: #fff; }
 
+/* ---- unified SVG icon system (v3.31.0) — every emoji in the chrome renders
+   as a monochrome stroke icon in the CURRENT text color: identical on every
+   OS, always in harmony with the dark theme ---- */
+.ics {
+  width: 1.12em; height: 1.12em; display: inline-block;
+  fill: none; stroke: currentColor; stroke-width: 1.9;
+  stroke-linecap: round; stroke-linejoin: round;
+  vertical-align: -0.22em; flex: none;
+}
+.brand .logo .ics { width: 1.15em; height: 1.15em; stroke-width: 2; color: #fff; }
+.lock-ic .ics { width: 1.6em; height: 1.6em; stroke-width: 1.7; }
+.stat .ic .ics { width: 1.05em; height: 1.05em; }
+.dz-icon .ics { width: 1.6em; height: 1.6em; stroke-width: 1.7; }
+.gate-action .ga-ic .ics { width: 1.7em; height: 1.7em; stroke-width: 1.7; }
+.pane-head .pane-ic .ics { width: 1.1em; height: 1.1em; }
+
 html { scroll-behavior: smooth; }
 
 body {
