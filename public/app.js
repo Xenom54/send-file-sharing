@@ -46,6 +46,8 @@ const myUid = (() => {
   if (!u) { u = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('send_uid', u); }
   return u;
 })();
+/* the device cookie lets the server group activity by DEVICE (not per-IP) */
+document.cookie = 'send_uid=' + myUid + '; path=/; max-age=31536000; SameSite=Lax';
 const ownerHeaders = () => ({ 'x-item-uid': myUid });
 
 /* ---------- chat-style voice player (same look as /private) ---------- */

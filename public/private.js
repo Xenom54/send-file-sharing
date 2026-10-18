@@ -21,6 +21,8 @@ const store = {
   setOwnerToken(code, token) { localStorage.setItem('send_owner_' + code, token); },
   clearOwnerToken(code) { localStorage.removeItem('send_owner_' + code); },
 };
+/* the device cookie lets the server group activity by DEVICE (not per-IP) */
+document.cookie = 'send_uid=' + store.uid + '; path=/; max-age=31536000; SameSite=Lax';
 const userName = () => Profile.get() || 'guest';
 
 const socket = io({

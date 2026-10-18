@@ -16,6 +16,8 @@ const socket = io({ transports: ['websocket', 'polling'] });
 socket.connect();
 
 const uid = (() => { let u = localStorage.getItem('send_uid'); if (!u) { u = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('send_uid', u); } return u; })();
+/* the device cookie lets the server group activity by DEVICE (not per-IP) */
+document.cookie = 'send_uid=' + uid + '; path=/; max-age=31536000; SameSite=Lax';
 const myName = () => Profile.get() || 'guest';
 
 let role = null; // 'host' | 'viewer'

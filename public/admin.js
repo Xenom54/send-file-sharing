@@ -84,9 +84,12 @@ async function loadTopIps() {
   try {
     ipList = await (await fetch('/api/admin/ips')).json();
     const top = ipList.slice().sort((a, b) => b.hits - a.hits).slice(0, 6);
-    $('#topIpsBox').innerHTML = top.length ? top.map(e =>
-      `<div class="pane-row"><div><div class="pr-title mono">${esc(e.ip)}</div><div class="small muted">${esc(ago(e.last))} · ${esc(String(e.ua || '').slice(0, 34))}</div></div><div class="pr-val">${e.hits}</div></div>`
-    ).join('') : '<div class="pane-row muted">No visitors recorded yet.</div>';
+    $('#topIpsBox').innerHTML = top.length ? top.map(e => {
+      // device-grouped: one card per device with all its rotating IPs listed
+      const more = (e.ips || []).filter(ip => ip !== e.ip);
+      const moreTxt = more.length ? `<div class="small muted" style="margin-top:2px">＋ ${more.length} more IP${more.length > 1 ? 's' : ''}: ${esc(more.slice(0, 3).join(', '))}</div>` : '';
+      return `<div class="pane-row"><div><div class="pr-title mono">${esc(e.ip)}</div><div class="small muted">${esc(ago(e.last))} · ${esc(String(e.ua || '').slice(0, 34))}</div>${moreTxt}</div><div class="pr-val">${e.hits}</div></div>`;
+    }).join('') : '<div class="pane-row muted">No visitors recorded yet.</div>';
   } catch { /* ignore */ }
 }
 
@@ -115,7 +118,10 @@ function ipScore(e) {
 
 function renderIps() {
   let list = ipList;
-  if (ipQuery) list = list.filter(e => String(e.ip).toLowerCase().includes(ipQuery));
+  if (ipQuery) list = list.filter(e =>
+    String(e.ip).toLowerCase().includes(ipQuery) ||
+    String(e.uid || '').toLowerCase().includes(ipQuery) ||
+    (e.ips || []).some(ip => String(ip).toLowerCase().includes(ipQuery)));
   list = list.slice().sort((a, b) => ipScore(b) - ipScore(a));
 
   $('#ipCount').textContent = `${list.length}${list.length !== ipList.length ? ' of ' + ipList.length : ''} visitors`;
@@ -132,6 +138,7 @@ function renderIps() {
     ].filter(([, n]) => n > 0);
     const isBot = /bot|crawler|spider|uptime|monitor/i.test(e.ua || '');
     const device = /mobile/i.test(e.ua || '') ? '📱 Mobile' : /tablet/i.test(e.ua || '') ? '📱 Tablet' : '💻 Desktop';
+    const moreIps = (e.ips || []).filter(ip => ip !== e.ip);
     return `
     <div class="card visitor-card">
       <div class="vc-head">
@@ -140,6 +147,7 @@ function renderIps() {
         <span class="spacer"></span>
         <span class="pill ${Date.now() - e.last < 300000 ? 'ok' : ''}">${Date.now() - e.last < 300000 ? 'online now' : esc(ago(e.last))}</span>
       </div>
+      ${moreIps.length ? `<div class="small muted" style="margin:6px 2px 0">↻ same device, ${moreIps.length} more IP${moreIps.length > 1 ? 's' : ''}: <span class="mono">${esc(moreIps.slice(0, 4).join(' · '))}</span>${moreIps.length > 4 ? ' …' : ''}</div>` : ''}
       <div class="vc-stats">
         ${chips.map(([label, n, ic]) => `<span class="vc-stat">${ic} ${esc(label)} <b>${n}</b></span>`).join('')}
       </div>

@@ -137,7 +137,10 @@ function megaPushUpload(fileName) {
 function log(action, detail, req) {
   const ip = req ? (clientIp(req) || 'unknown') : 'system';
   const ua = req ? (req.headers['user-agent'] || 'unknown') : 'system';
-  logs.unshift({ id: crypto.randomBytes(6).toString('hex'), ts: Date.now(), action, detail, ip, ua });
+  // device identity: the stable send_uid cookie (set by every client) groups
+  // entries by DEVICE — one person with rotating IPs shows as one visitor
+  const dev = req && req.cookies ? String(req.cookies.send_uid || '').slice(0, 64) : '';
+  logs.unshift({ id: crypto.randomBytes(6).toString('hex'), ts: Date.now(), action, detail, ip, ua, uid: dev });
   if (logs.length > 5000) logs.length = 5000;
   saveLogs();
 }
@@ -818,19 +821,24 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
   });
 });
 
-/* every IP that ever hit the site (aggregated from logs) */
+/* every DEVICE that ever hit the site (aggregated from logs).
+   v3.31.3: grouped by the stable send_uid device cookie — one person with
+   rotating IPs shows as ONE visitor with all their IPs listed. Legacy log
+   entries without a uid still group by IP (backward compatible). */
 app.get('/api/admin/ips', requireAdmin, (req, res) => {
   const map = new Map();
   for (const l of logs) {
-    if (!l.ip) continue;
-    const e = map.get(l.ip) || { ip: l.ip, hits: 0, first: l.ts, last: 0, ua: '', actions: {} };
+    if (!l.ip && !l.uid) continue;
+    const key = l.uid || l.ip;
+    const e = map.get(key) || { key, uid: l.uid || null, ip: l.ip, ips: [], hits: 0, first: l.ts, last: 0, ua: '', actions: {} };
     e.hits++;
+    if (l.ip && !e.ips.includes(l.ip)) e.ips.push(l.ip);
     if (l.ts < e.first) e.first = l.ts;
-    if (l.ts >= e.last) { e.last = l.ts; e.ua = l.ua || e.ua; }
+    if (l.ts >= e.last) { e.last = l.ts; e.ua = l.ua || e.ua; if (l.ip) e.ip = l.ip; }
     e.actions[l.action] = (e.actions[l.action] || 0) + 1;
-    map.set(l.ip, e);
+    map.set(key, e);
   }
-  res.json([...map.values()].sort((a, b) => b.last - a.last));
+  res.json([...map.values()].sort((a, b) => b.last - a.last).map(e => ({ ...e, ips: e.ips.slice(0, 6) })));
 });
 
 /* ============================== FOLDERS ==============================
