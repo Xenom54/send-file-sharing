@@ -128,32 +128,31 @@ function renderIps() {
 
   $('#ipCards').innerHTML = list.length ? list.map(e => {
     const a = e.actions || {};
-    const chips = [
-      ['visits', a.visit || 0, '👀'],
-      ['uploads', (a.upload || 0) + (a.chat_image || 0), '⬆️'],
-      ['chat', (a.chat_msg || 0) + (a.chat_join || 0) + (a.ai_msg || 0), '💬'],
-      ['downloads', a.download || 0, '⬇️'],
-      ['admin', (a.admin_login || 0) + (a.privateadmin_login || 0), '🛡️'],
-      ['deletes', (a.delete || 0) + (a.purge || 0), '🗑'],
-    ].filter(([, n]) => n > 0);
+    const stats = [
+      ['requests', e.hits || 0],
+      ['uploads', (a.upload || 0) + (a.chat_image || 0)],
+      ['chat', (a.chat_msg || 0) + (a.chat_join || 0) + (a.ai_msg || 0)],
+      ['downloads', a.download || 0],
+      ['admin', (a.admin_login || 0) + (a.privateadmin_login || 0)],
+      ['deletes', (a.delete || 0) + (a.purge || 0)],
+    ];
     const isBot = /bot|crawler|spider|uptime|monitor/i.test(e.ua || '');
     const device = /mobile/i.test(e.ua || '') ? '📱 Mobile' : /tablet/i.test(e.ua || '') ? '📱 Tablet' : '💻 Desktop';
     const moreIps = (e.ips || []).filter(ip => ip !== e.ip);
+    const online = Date.now() - e.last < 300000;
     return `
     <div class="card visitor-card">
       <div class="vc-head">
         <span class="ip mono">${esc(e.ip)}</span>
         ${isBot ? '<span class="pill">🤖 bot</span>' : `<span class="pill">${device}</span>`}
         <span class="spacer"></span>
-        <span class="pill ${Date.now() - e.last < 300000 ? 'ok' : ''}">${Date.now() - e.last < 300000 ? 'online now' : esc(ago(e.last))}</span>
+        <span class="pill ${online ? 'ok' : ''}">${online ? 'online now' : esc(ago(e.last))}</span>
       </div>
-      ${moreIps.length ? `<div class="small muted" style="margin:6px 2px 0">↻ same device, ${moreIps.length} more IP${moreIps.length > 1 ? 's' : ''}: <span class="mono">${esc(moreIps.slice(0, 4).join(' · '))}</span>${moreIps.length > 4 ? ' …' : ''}</div>` : ''}
-      <div class="vc-stats">
-        ${chips.map(([label, n, ic]) => `<span class="vc-stat">${ic} ${esc(label)} <b>${n}</b></span>`).join('')}
+      ${moreIps.length ? `<div class="vc-ips">↻ same device · <span class="mono">${esc(moreIps.slice(0, 4).join(' · '))}</span>${moreIps.length > 4 ? ' …' : ''}</div>` : ''}
+      <div class="vc-grid">
+        ${stats.map(([label, n]) => `<div class="vc-cell"><b>${n}</b><span>${label}</span></div>`).join('')}
       </div>
-      <div class="vc-foot small muted">
-        first seen ${esc(ago(e.first))} · ${e.hits} total requests
-      </div>
+      <div class="vc-foot">first seen <b>${esc(ago(e.first))}</b></div>
     </div>`;
   }).join('') : `<div class="card empty"><div class="emoji">🌐</div>
     <div class="t">No visitors recorded yet</div></div>`;
