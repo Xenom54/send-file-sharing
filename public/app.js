@@ -254,8 +254,18 @@ $('#items').addEventListener('click', e => {
   const img = e.target.closest('.zoomable');
   if (img) { $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); }
 });
-$('#lightbox').addEventListener('click', () => $('#lightbox').classList.remove('open'));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#lightbox').classList.remove('open'); $('#editModal').classList.remove('open'); } });
+$('#lightbox').addEventListener('click', e => {
+  const box = $('#lightbox');
+  // clicking the IMAGE toggles 1:1 (natural size, scrollable) — clicking the
+  // dark background closes
+  if (e.target.id === 'lightboxImg') {
+    const zoomed = box.classList.toggle('zoomed');
+    $('#lbHint').textContent = zoomed ? '1:1 — scroll to pan · click the image to fit' : 'click the image for 1:1';
+    return;
+  }
+  box.classList.remove('open', 'zoomed');
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#lightbox').classList.remove('open', 'zoomed'); $('#editModal').classList.remove('open'); } });
 
 async function delItem(id) {
   const it = findItemAnywhere(id) || items.find(x => x.id === id) || null;

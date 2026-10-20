@@ -434,9 +434,7 @@ label.fl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: 
 }
 .item .text-body::-webkit-scrollbar, .tablewrap::-webkit-scrollbar, .messages::-webkit-scrollbar { width: 9px; height: 9px; }
 .item .text-body::-webkit-scrollbar-thumb, .tablewrap::-webkit-scrollbar-thumb, .messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 99px; }
-.item img { width: auto; max-width: 100%; border-radius: var(--r-sm); display: block; cursor: zoom-in; border: 1px solid var(--border); transition: transform .2s; margin-inline: auto; }
-.item.imgfull { grid-column: 1 / -1; } /* image items span the full row so the picture is fully readable inline */
-.item.imgfull img { max-width: min(100%, 1100px); }
+.item img { width: 100%; border-radius: var(--r-sm); display: block; cursor: zoom-in; border: 1px solid var(--border); transition: transform .2s; }
 .item img:hover { transform: scale(1.015); }
 .item audio, .item video { width: 100%; border-radius: var(--r-sm); outline: none; border: 1px solid var(--border); }
 .item audio { filter: invert(0.92) hue-rotate(180deg); } /* dark-style native player */
@@ -463,7 +461,17 @@ label.fl { display: block; font-size: .74rem; font-weight: 700; letter-spacing: 
 /* lightbox */
 .lightbox { position: fixed; inset: 0; z-index: 220; background: rgba(3, 4, 10, .94); backdrop-filter: blur(8px); display: none; place-items: center; padding: 34px; cursor: zoom-out; }
 .lightbox.open { display: grid; animation: fade .2s; }
-.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r); box-shadow: 0 30px 90px rgba(0, 0, 0, .8); border: 1px solid var(--border-2); cursor: default; }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r); box-shadow: 0 30px 90px rgba(0, 0, 0, .8); border: 1px solid var(--border-2); cursor: zoom-in; }
+/* 1:1 mode: the image at its NATURAL size with scrolling — see every pixel */
+.lightbox.zoomed { overflow: auto; place-items: flex-start center; display: grid; }
+.lightbox.zoomed img { max-width: none; max-height: none; cursor: zoom-out; }
+.lightbox .lb-hint {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  z-index: 5; pointer-events: none;
+  font-size: .72rem; font-weight: 700; color: var(--text-2);
+  background: rgba(15, 17, 30, .94); border: 1px solid var(--border-2);
+  padding: 6px 14px; border-radius: 99px;
+}
 .lightbox-close {
   position: absolute; top: 18px; right: 18px; z-index: 2;
   width: 40px; height: 40px; border-radius: 50%; cursor: pointer;

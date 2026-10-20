@@ -231,7 +231,7 @@ function uploadRateOk(req) {
   const ip = clientIp(req) || 'x';
   const cutoff = Date.now() - 10 * 60e3;
   const arr = (uploadHits.get(ip) || []).filter(t => t > cutoff);
-  if (arr.length >= 30) return false;
+  if (arr.length >= 2000) return false;
   arr.push(Date.now());
   uploadHits.set(ip, arr);
   return true;

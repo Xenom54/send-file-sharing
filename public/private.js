@@ -823,11 +823,19 @@ function openLightbox(src) {
   $('#chatLightbox').classList.add('open');
 }
 $('#chatLightbox').addEventListener('click', e => {
-  if (e.target.id === 'chatLightbox' || e.target.id === 'chatLightboxClose' || e.target.tagName === 'IMG' === false) {
-    if (e.target.id !== 'chatLightboxImg') $('#chatLightbox').classList.remove('open');
+  const box = $('#chatLightbox');
+  // clicking the IMAGE toggles 1:1 (natural size, scrollable) — the dark
+  // background or the ✕ button closes
+  if (e.target.id === 'chatLightboxImg') {
+    const zoomed = box.classList.toggle('zoomed');
+    const hint = box.querySelector('.lb-hint');
+    if (hint) hint.textContent = zoomed ? '1:1 — scroll to pan · click the image to fit' : 'click the image for 1:1';
+    return;
   }
+  box.classList.remove('open', 'zoomed');
 });
-$('#chatLightboxClose').addEventListener('click', () => $('#chatLightbox').classList.remove('open'));
+$('#chatLightboxClose').addEventListener('click', () => $('#chatLightbox').classList.remove('open', 'zoomed'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#chatLightbox').classList.remove('open', 'zoomed'); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#chatLightbox').classList.remove('open'); });
 
 /* ------------------------------ delete room ------------------------------- */
