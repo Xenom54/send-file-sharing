@@ -323,6 +323,7 @@ const clientIp = req => String(
    - strict CSP: the pages have zero inline <script>; Google Fonts + blob media allowed
    - frame-ancestors 'none' + XFO DENY (clickjacking), nosniff everywhere */
 app.disable('x-powered-by');
+app.use((req, res, next) => { if (req.url.includes('uploads')) console.log('[req-dbg]', req.method, req.url); next(); });
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -652,6 +653,7 @@ app.post('/api/admin/items/soft-delete-all', requireAdmin, (req, res) => {
 app.get('/uploads/:filename', async (req, res) => {
   const fn = path.basename(req.params.filename);
   const p = path.join(UPLOAD_DIR, fn);
+  console.log('[uploads-dbg]', req.url, '->', p, 'exists:', fs.existsSync(p), 'uploadDir:', UPLOAD_DIR);
   // file missing locally? try pulling it from a backup (covers restore-in-progress)
   if (!fs.existsSync(p) && (mega.configured() || backup.configured())) {
     try {
@@ -1133,6 +1135,76 @@ app.post('/api/chat/upload', uploadRateLimited, chatUpload.single('file'), (req,
     : req.file.mimetype.startsWith('video/') ? 'video' : 'file';
   log('chat_image', `${kind}: ${originalName}`, req);
   res.json({ url: '/uploads/' + encodeURIComponent(req.file.filename), kind, name: originalName, size: req.file.size });
+});
+
+/* ---- chunked uploads (v3.33.0): ANY size up to 5 GB through proxies that
+   cap request bodies (Cloudflare free = 100 MB/request) and timeouts.
+   Protocol: the client slices the file, uploads every part to
+   /api/items/upload-chunk (ordered, one at a time), then calls
+   /api/items/upload-complete to assemble + create the item. ---- */
+const CHUNK_PARTS_DIR = path.join(UPLOAD_DIR, '.parts');
+fs.mkdirSync(CHUNK_PARTS_DIR, { recursive: true });
+const chunkIdOk = v => String(v || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64);
+
+app.post('/api/items/upload-chunk', uploadRateLimited, upload.single('chunk'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'no chunk' });
+    const id = chunkIdOk(req.body?.uploadId);
+    const idx = parseInt(req.body?.index, 10);
+    const total = parseInt(req.body?.total, 10);
+    if (!id || !Number.isInteger(idx) || idx < 0 || !Number.isInteger(total) || total < 1 || total > 10000) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.status(400).json({ error: 'bad chunk metadata' });
+    }
+    // move the multer temp file into the parts area, in order
+    const partPath = path.join(CHUNK_PARTS_DIR, `${id}.part${idx}`);
+    fs.renameSync(req.file.path, partPath);
+    res.json({ ok: true, received: idx + 1, total });
+  } catch (e) { console.error('[chunk]', e.message); res.status(500).json({ error: 'chunk failed' }); }
+});
+
+app.post('/api/items/upload-complete', uploadRateLimited, async (req, res) => {
+  try {
+    const id = chunkIdOk(req.body?.uploadId);
+    const total = parseInt(req.body?.total, 10);
+    if (!id || !Number.isInteger(total) || total < 1 || total > 10000) return res.status(400).json({ error: 'bad metadata' });
+    const originalName = fixUploadName(String(req.body?.originalName || 'file'));
+    let ext = (path.extname(originalName) || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+    if (!ext) ext = '.bin';
+    // every part must exist, IN ORDER — refuse to assemble a broken file
+    const partPaths = [];
+    for (let i = 0; i < total; i++) {
+      const p = path.join(CHUNK_PARTS_DIR, `${id}.part${i}`);
+      if (!fs.existsSync(p)) { for (const pp of partPaths) { try { fs.unlinkSync(pp); } catch {} } return res.status(400).json({ error: 'missing chunk ' + i }); }
+      partPaths.push(p);
+    }
+    const fileName = `${Date.now()}-${newId()}${ext}`;
+    const finalPath = path.join(UPLOAD_DIR, fileName);
+    const out = fs.createWriteStream(finalPath);
+    for (const p of partPaths) await new Promise((resolve, reject) => {
+      const rs = fs.createReadStream(p);
+      rs.pipe(out, { end: false });
+      rs.on('end', resolve);
+      rs.on('error', reject);
+    });
+    await new Promise(resolve => out.end(resolve));
+    for (const p of partPaths) { try { fs.unlinkSync(p); } catch {} }
+    const size = fs.statSync(finalPath).size;
+    const mime = String(req.body?.mime || 'application/octet-stream').slice(0, 100);
+    const it = {
+      id: newId(),
+      type: mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'file',
+      title: req.body?.title ? String(req.body.title).slice(0, 200) : originalName,
+      fileName, originalName, mime, size,
+      createdAt: Date.now(), ip: req.ip, downloads: 0, deleted: false,
+      uid: String(req.body?.uid || '').slice(0, 64),
+      ownerName: String(req.body?.ownerName || '').slice(0, 30),
+    };
+    if (req.body?.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
+    items.push(it); saveItems();
+    log('upload', `${it.type}: ${it.originalName} (${it.size} bytes, chunked)`, req);
+    res.json(publicItem(it));
+  } catch (e) { console.error('[chunk complete]', e.message); res.status(500).json({ error: 'assembly failed' }); }
 });
 
 const server = http.createServer(app);

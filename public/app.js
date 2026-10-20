@@ -445,10 +445,16 @@ function uploadOne(file, titleOverride) {
   $('#uploadQueue').appendChild(row);
   const bar = row.querySelector('.prog > i');
   const status = row.querySelector('.up-status');
+  const title = titleOverride ?? file.name;
+
+  // large files (over 90 MB) go CHUNKED: slices upload one by one through any
+  // proxy body limit, then the server assembles them into the final file
+  const CHUNK = 90 * 1024 * 1024;
+  if (file.size > CHUNK) return uploadChunked(file, title, row, bar, status, CHUNK);
 
   const fd = new FormData();
   fd.append('file', file);
-  fd.append('title', titleOverride ?? file.name);
+  fd.append('title', title);
   fd.append('uid', myUid);
   fd.append('ownerName', Profile.get() || 'guest');
   if (activeFolder) fd.append('folder', activeFolder);
@@ -482,6 +488,57 @@ function uploadOne(file, titleOverride) {
     toast(`⚠ Upload failed: ${file.name}`, 'err');
   });
   xhr.send(fd);
+}
+
+/* chunked upload: slices ANY large file into ordered parts, uploads them one
+   by one (each with its own progress + retries), then asks the server to
+   assemble — files up to 5 GB work through 100 MB proxy caps and timeouts */
+async function uploadChunked(file, title, row, bar, status, CHUNK) {
+  const total = Math.ceil(file.size / CHUNK);
+  const uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  const ownerName = Profile.get() || 'guest';
+  status.textContent = `Uploading… 0% of ${fmtSize(file.size)} (${total} parts)`;
+  try {
+    for (let i = 0; i < total; i++) {
+      const blob = file.slice(i * CHUNK, Math.min((i + 1) * CHUNK, file.size));
+      let done = false;
+      for (let attempt = 0; attempt < 3 && !done; attempt++) {
+        try {
+          await new Promise((resolve, reject) => {
+            const fd = new FormData();
+            fd.append('chunk', blob, `part${i}`);
+            fd.append('uploadId', uploadId);
+            fd.append('index', String(i));
+            fd.append('total', String(total));
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/items/upload-chunk');
+            xhr.addEventListener('load', () => { xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('HTTP ' + xhr.status)); });
+            xhr.addEventListener('error', () => reject(new Error('network')));
+            xhr.send(fd);
+          });
+          done = true;
+        } catch (err) { if (attempt === 2) throw err; await sleep(1500); }
+      }
+      bar.style.width = Math.round(((i + 1) / total) * 100) + '%';
+      status.textContent = `Uploading… ${Math.round(((i + 1) / total) * 100)}% of ${fmtSize(file.size)} (part ${i + 1}/${total})`;
+    }
+    status.textContent = 'Assembling…';
+    const r = await fetch('/api/items/upload-complete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+      body: JSON.stringify({ uploadId, total, originalName: file.name, title, mime: file.type || 'application/octet-stream', uid: myUid, ownerName, folder: activeFolder || undefined }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'assembly failed'); }
+    bar.style.width = '100%';
+    status.textContent = '✓ Uploaded';
+    row.style.borderColor = 'rgba(52, 211, 153, .45)';
+    toast(`✓ ${file.name} uploaded (${fmtSize(file.size)})`);
+    if (activeFolder) loadFolderItems(activeFolder); else load();
+  } catch (e) {
+    status.textContent = '✕ Failed: ' + (e.message || 'upload failed');
+    row.style.borderColor = 'rgba(251, 113, 133, .45)';
+    toast(`⚠ Upload failed: ${file.name}`, 'err');
+  }
+  setTimeout(() => row.remove(), 3200);
 }
 
 /* ------------------------------- recording ------------------------------- */
