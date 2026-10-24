@@ -376,9 +376,10 @@ document.addEventListener('paste', e => {
   if (!files.length) return;
   e.preventDefault();
   // every pasted file gets a title FIRST (the user names it before it goes up)
+  // v3.33.1 fix: entries now carry send() — the modal needs it to upload
   openSendTitle(files.map(f => f.type.startsWith('image/')
-    ? { icon: '🖼️', headerText: 'Title your image', preview: f, defaultTitle: '', file: f, fallbackName: f.name }
-    : { icon: '📄', headerText: 'Name your file', meta: f, defaultTitle: f.name, file: f, fallbackName: f.name }));
+    ? { icon: '🖼️', headerText: 'Title your image', preview: f, defaultTitle: '', file: f, fallbackName: f.name, send: (title) => uploadOne(f, title) }
+    : { icon: '📄', headerText: 'Name your file', meta: f, defaultTitle: f.name, file: f, fallbackName: f.name, send: (title) => uploadOne(f, title) }));
   if (files.length) toast('📎 Name it, then send…');
 });
 
@@ -418,7 +419,14 @@ function nextSend() {
     const title = $('#pasteTitleInput').value.trim();
     if (prevBox._vmAudio) { try { prevBox._vmAudio.pause(); } catch {} }
     $('#pasteTitleModal').classList.remove('open');
-    it.send(title || it.fallbackName || undefined);
+    // v3.33.1 fix: an entry without send() used to throw "it.send is not a
+    // function" here and the upload silently never happened. Fall back to the
+    // plain uploader whenever the entry carries a file.
+    const sendFn = typeof it.send === 'function'
+      ? it.send
+      : (it.file ? (t) => uploadOne(it.file, t) : null);
+    if (sendFn) sendFn(title || it.fallbackName || undefined);
+    else toast('⚠ Upload failed — unsupported entry', 'err');
     nextSend();
   };
   $('#pasteCancel').onclick = () => {
@@ -433,7 +441,12 @@ function uploadFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
   // every file gets a title BEFORE it uploads (same flow as pasted images)
-  openSendTitle(files.map(f => ({ icon: '📄', headerText: 'Name your file', meta: f, defaultTitle: f.name, file: f, fallbackName: f.name })));
+  // v3.33.1 fix: entries now carry send() — the modal needs it to upload
+  openSendTitle(files.map(f => ({
+    icon: '📄', headerText: 'Name your file', meta: f,
+    defaultTitle: f.name, file: f, fallbackName: f.name,
+    send: (title) => uploadOne(f, title),
+  })));
 }
 
 function uploadOne(file, titleOverride) {

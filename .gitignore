@@ -9,3 +9,4 @@ npm-cache
 # PRIVATE DATA — never upload these
 data/
 uploads/
+.local-test/
