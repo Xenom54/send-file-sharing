@@ -105,12 +105,30 @@ function backupPush(prefix, name) {
       .catch(e => console.error('[backup] push', name, e.message));
   }, 8000);
 }
-function backupPushUpload(fileName) {
+function backupPushUpload(fileName, size) {
   if (!backup.configured()) return;
+  /* v3.34.0: GitHub gets SMALL files only. Its put() reads the whole file into
+     RAM and base64s it (+~35%, plus a JSON body copy) — pushing 50 MB+ uploads
+     there spiked hundreds of MB and OOM-killed the 512 MB Render container
+     right after the upload, which resurrected stale data on the next boot.
+     MEGA streams from disk and safely takes everything up to 500 MB. */
+  if (Number(size) > 25 * 1024 * 1024) return;
   const abs = path.join(UPLOAD_DIR, fileName);
   if (!fs.existsSync(abs)) return;
   backup.put(backupName('uploads', fileName), abs)
     .catch(e => console.error('[backup] push upload', fileName, e.message));
+}
+
+/* v3.34.0: upload survival — back up items.json IMMEDIATELY (skip the 8s
+   debounce) right after an upload is accepted, enqueued BEFORE the file pushes.
+   A crash/redeploy seconds later then restores a state that still contains the
+   item the user was already told was "✓ Uploaded", instead of resurrecting the
+   pre-upload snapshot and silently deleting it for everyone. */
+function flushItemsBackup() {
+  if (backup.configured()) backup.put(backupName('data', 'items.json'), paths.items)
+    .catch(e => console.error('[backup] flush items.json', e.message));
+  if (mega.configured()) mega.put('data', 'items.json', paths.items)
+    .catch(e => console.error('[mega] flush items.json', e.message));
 }
 
 /* --- MEGA cloud backup (primary: stores everything, no 100 MB cap) --- */
@@ -543,7 +561,15 @@ app.get('/api/streamadmin/streams', (req, res) => {
 });
 
 // health check (for uptime monitors / deployment platforms)
-app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), items: items.length }));
+app.get('/api/health', (req, res) => res.json({
+  ok: true, uptime: process.uptime(), items: items.length,
+  // v3.34.0: cheap backup verdict (no network calls) — a stale lastPushAt or a
+  // repeating lastError here explains "uploads vanish after a restart" early
+  backups: {
+    mega: mega.health(),
+    github: backup.health(),
+  },
+}));
 
 /* --------------------------------- api ------------------------------------ */
 // ---- items (main page: only items that live OUTSIDE folders)
@@ -589,7 +615,8 @@ app.post('/api/items/upload', uploadRateLimited, upload.single('file'), (req, re
   };
   if (req.body.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
-  backupPushUpload(it.fileName);
+  flushItemsBackup(); // v3.34.0: item index reaches the backups FIRST, then the file
+  backupPushUpload(it.fileName, it.size);
   megaPushUpload(it.fileName);
   log('upload', `${it.type}: ${it.originalName} (${it.size} bytes)`, req);
   res.json(publicItem(it));
@@ -614,7 +641,8 @@ app.post('/api/items/audio', uploadRateLimited, upload.single('audio'), (req, re
   };
   if (req.body?.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
   items.push(it); saveItems();
-  backupPushUpload(it.fileName);
+  flushItemsBackup(); // v3.34.0: item index reaches the backups FIRST, then the file
+  backupPushUpload(it.fileName, it.size);
   megaPushUpload(it.fileName);
   log('upload', `audio: ${it.title}`, req);
   res.json(publicItem(it));
@@ -1127,7 +1155,8 @@ const chatUpload = multer({
 
 app.post('/api/chat/upload', uploadRateLimited, chatUpload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no file or type rejected' });
-  backupPushUpload(req.file.filename);
+  // v3.34.0: chat files have no items.json entry — just push the file (queued)
+  backupPushUpload(req.file.filename, req.file.size);
   megaPushUpload(req.file.filename);
   const originalName = fixUploadName(req.file.originalname);
   const kind = req.file.mimetype.startsWith('image/') ? 'image'
@@ -1202,6 +1231,13 @@ app.post('/api/items/upload-complete', uploadRateLimited, async (req, res) => {
     };
     if (req.body?.folder && folderName(req.body.folder)) it.folder = folderName(req.body.folder);
     items.push(it); saveItems();
+    /* v3.34.0 CRITICAL: the assemble path forgot the backup pushes entirely —
+       chunked files (all >90 MB) NEVER reached MEGA/GitHub, so after any
+       redeploy/restore the item survived (items.json backup) but the FILE was
+       gone: downloads 404'd and "the file disappeared for other users". */
+    flushItemsBackup(); // item index reaches the backups FIRST, then the file
+    backupPushUpload(it.fileName, it.size);
+    megaPushUpload(it.fileName);
     log('upload', `${it.type}: ${it.originalName} (${it.size} bytes, chunked)`, req);
     res.json(publicItem(it));
   } catch (e) { console.error('[chunk complete]', e.message); res.status(500).json({ error: 'assembly failed' }); }
@@ -2036,6 +2072,32 @@ async function backupRestoreData() {
   return restored;
 }
 
+/* v3.34.0: freshness-aware restore for the items index. Restore prefers MEGA,
+   but if MEGA's items.json push was failing/throttled before the restart,
+   GitHub may hold a NEWER index — the old "MEGA first" logic then resurrected
+   hours-old data and recently-uploaded items silently vanished for everyone.
+   Soft-deletes keep entries in the array, so a newer copy has a >= max
+   createdAt; only replace the local file when GitHub's is strictly newer. */
+async function preferNewerItemsJson() {
+  if (!backup.configured()) return;
+  try {
+    const f = await backup.getFile('data/items.json');
+    if (!f || !f.content) return;
+    let gh;
+    try { gh = JSON.parse(Buffer.from(f.content, 'base64').toString('utf8')); } catch { return; }
+    if (!Array.isArray(gh) || !gh.length) return;
+    const local = readJSON(paths.items, []);
+    if (!Array.isArray(local) || !local.length) return; // empty local = restore path already handled it
+    const newest = a => a.reduce((m, i) => Math.max(m, (i && i.createdAt) || 0), 0);
+    const gNewest = newest(gh), lNewest = newest(local);
+    const ghNewer = gNewest > lNewest || (gNewest === lNewest && gh.length > local.length);
+    if (ghNewer) {
+      fs.writeFileSync(paths.items, JSON.stringify(gh, null, 2));
+      console.log(`[backup] items.json: GitHub copy is newer (max createdAt ${gNewest} > ${lNewest}) — using it`);
+    }
+  } catch (e) { console.error('[backup] items.json freshness check failed', e.message); }
+}
+
 async function megaRestoreUploads() {
   if (!mega.configured()) return 0;
   try {
@@ -2167,6 +2229,11 @@ async function backupRestoreUploads() {
   /* gap healing runs on EVERY boot: any file that is still missing (a partial
      restore, a failed pull, manual loss) is pulled from the backups */
   restoredCount += await healMissingFiles();
+
+  /* v3.34.0: run on EVERY boot (also when local data survived) — if the process
+     died before the items.json backup push landed in MEGA, GitHub's newer copy
+     must win over the restored/persisted stale one. */
+  await preferNewerItemsJson();
 
   if (restoredCount > 0) {
     reloadRuntimeState();

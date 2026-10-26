@@ -94,8 +94,24 @@ async function deleteNode(node) {
 }
 
 /* upload/overwrite a local file. prefix: 'data' | 'uploads'.
-   Uploads the new version FIRST, then deletes the old node (no backup gap). */
+   Uploads the new version FIRST, then deletes the old node (no backup gap).
+   v3.34.0: all writes run through ONE queue. Every used to start its own
+   concurrent MEGA upload — several big files encrypting (AES, CPU-bound on the
+   free tier) + uploading at once starved the event loop and piled up RAM.
+   Serialized: items.json (tiny) goes first when enqueued first, so a crash
+   right after an upload still leaves a restorable state. */
+let writeChain = Promise.resolve();
+function enqueueWrite(job) {
+  const run = writeChain.then(job, job);
+  writeChain = run.catch(() => {});
+  return run;
+}
+
 async function put(prefix, name, localPath) {
+  return enqueueWrite(() => putNow(prefix, name, localPath));
+}
+
+async function putNow(prefix, name, localPath) {
   if (!configured()) throw new Error('MEGA backup not configured');
   try {
     const size = fs.statSync(localPath).size;
@@ -121,13 +137,20 @@ async function put(prefix, name, localPath) {
   } catch (e) { markError(e); throw e; }
 }
 
-/* delete a file from the backup */
+/* delete a file from the backup (queued with the puts — no reorder races) */
 async function remove(prefix, name) {
-  if (!configured()) return;
-  await connect();
-  const dir = dirFor(prefix);
-  const existing = child(dir, name);
-  if (existing) await deleteNode(existing);
+  return enqueueWrite(async () => {
+    if (!configured()) return;
+    await connect();
+    const dir = dirFor(prefix);
+    const existing = child(dir, name);
+    if (existing) await deleteNode(existing);
+  });
+}
+
+/* cheap health snapshot for /api/health (no network calls) */
+function health() {
+  return { configured: !!cfg, pushCount: status.pushCount, lastPushAt: status.lastPushAt, lastError: status.lastError, lastErrorAt: status.lastErrorAt };
 }
 
 /* download a small file as a Buffer (for data JSONs) */
@@ -194,4 +217,4 @@ async function info() {
   }
 }
 
-module.exports = { configured, setup, put, remove, getBuffer, list, downloadTo, accountInfo, info, MAX_BYTES };
+module.exports = { configured, setup, put, remove, getBuffer, list, downloadTo, accountInfo, info, health, MAX_BYTES };

@@ -10,3 +10,4 @@ npm-cache
 data/
 uploads/
 .local-test/
+local-test-tmp/

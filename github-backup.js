@@ -42,10 +42,31 @@ const MAX_BYTES = 100 * 1024 * 1024; // GitHub hard limit per file
 /* health/status info for the admin dashboard */
 const status = { pushCount: 0, lastPushAt: null, lastError: null, lastErrorAt: null };
 
+/* v3.34.0: serialize ALL writes. Two concurrent PUTs of the same path race on
+   the sha (one always 409s) and parallel big pushes stack several file buffers
+   in RAM at once. One write at a time, always, regardless of prior failures. */
+let writeChain = Promise.resolve();
+function enqueueWrite(job) {
+  const run = writeChain.then(job, job);
+  writeChain = run.catch(() => {});
+  return run;
+}
+
 async function put(remotePath, localPath) {
+  return enqueueWrite(() => putNow(remotePath, localPath));
+}
+
+async function putNow(remotePath, localPath) {
   try {
+    /* v3.34.0 CRITICAL: size-check BEFORE reading. put() used to readFileSync
+       the WHOLE file and base64 it (+~35% more, then a JSON body copy on top)
+       even for files over the cap — the size was checked AFTER the read. Every
+       50 MB+ upload spiked ~200-400 MB of RAM and OOM-killed the 512 MB Render
+       container right after the user saw "✓ Uploaded", losing the item on the
+       next boot restore. statSync first: skip without ever allocating. */
+    const size = fs.statSync(localPath).size;
+    if (size > MAX_BYTES) throw new Error('file > 100 MB, skipped');
     const content = fs.readFileSync(localPath);
-    if (content.length > MAX_BYTES) throw new Error('file > 100 MB, skipped');
     const body = { message: 'backup ' + remotePath, content: content.toString('base64'), branch: 'main' };
     try {
       const existing = await api(`/repos/${cfg.repo}/contents/${encPath(remotePath)}`);
@@ -63,11 +84,19 @@ async function put(remotePath, localPath) {
   }
 }
 
+function health() {
+  return { configured: !!cfg, pushCount: status.pushCount, lastPushAt: status.lastPushAt, lastError: status.lastError, lastErrorAt: status.lastErrorAt };
+}
+
 function info() {
   return { configured: !!cfg, repo: cfg ? cfg.repo : null, ...status };
 }
 
 async function remove(remotePath) {
+  return enqueueWrite(() => removeNow(remotePath));
+}
+
+async function removeNow(remotePath) {
   let sha = null;
   try { const e = await api(`/repos/${cfg.repo}/contents/${encPath(remotePath)}`); sha = e && e.sha; } catch {}
   if (!sha) return;
@@ -106,4 +135,4 @@ async function getFile(remotePath) {
   return { content: blob.content };
 }
 
-module.exports = { configured, setup, put, remove, listDir, getFile, info };
+module.exports = { configured, setup, put, remove, listDir, getFile, info, health };

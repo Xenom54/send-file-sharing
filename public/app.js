@@ -460,9 +460,11 @@ function uploadOne(file, titleOverride) {
   const status = row.querySelector('.up-status');
   const title = titleOverride ?? file.name;
 
-  // large files (over 90 MB) go CHUNKED: slices upload one by one through any
-  // proxy body limit, then the server assembles them into the final file
-  const CHUNK = 90 * 1024 * 1024;
+  // v3.34.0: anything over 16 MB goes CHUNKED — 16 MB parts each finish well
+  // inside Cloudflare's ~100 s proxy timeout (a single 50-90 MB POST from a
+  // normal connection used to exceed it and die), each part gets its own
+  // progress + retries, and the server assembles the final file
+  const CHUNK = 16 * 1024 * 1024;
   if (file.size > CHUNK) return uploadChunked(file, title, row, bar, status, CHUNK);
 
   const fd = new FormData();
@@ -503,9 +505,9 @@ function uploadOne(file, titleOverride) {
   xhr.send(fd);
 }
 
-/* chunked upload: slices ANY large file into ordered parts, uploads them one
-   by one (each with its own progress + retries), then asks the server to
-   assemble — files up to 5 GB work through 100 MB proxy caps and timeouts */
+/* chunked upload: slices ANY large file into 16 MB ordered parts, uploads them
+   one by one (each with its own progress + retries), then asks the server to
+   assemble — files up to 5 GB work through proxy body caps and timeouts */
 async function uploadChunked(file, title, row, bar, status, CHUNK) {
   const total = Math.ceil(file.size / CHUNK);
   const uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
