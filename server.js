@@ -2079,23 +2079,25 @@ async function backupRestoreData() {
    Soft-deletes keep entries in the array, so a newer copy has a >= max
    createdAt; only replace the local file when GitHub's is strictly newer. */
 async function preferNewerItemsJson() {
-  if (!backup.configured()) return;
+  if (!backup.configured()) return false;
   try {
     const f = await backup.getFile('data/items.json');
-    if (!f || !f.content) return;
+    if (!f || !f.content) return false;
     let gh;
-    try { gh = JSON.parse(Buffer.from(f.content, 'base64').toString('utf8')); } catch { return; }
-    if (!Array.isArray(gh) || !gh.length) return;
+    try { gh = JSON.parse(Buffer.from(f.content, 'base64').toString('utf8')); } catch { return false; }
+    if (!Array.isArray(gh) || !gh.length) return false;
     const local = readJSON(paths.items, []);
-    if (!Array.isArray(local) || !local.length) return; // empty local = restore path already handled it
+    if (!Array.isArray(local) || !local.length) return false; // empty local = restore path already handled it
     const newest = a => a.reduce((m, i) => Math.max(m, (i && i.createdAt) || 0), 0);
     const gNewest = newest(gh), lNewest = newest(local);
     const ghNewer = gNewest > lNewest || (gNewest === lNewest && gh.length > local.length);
     if (ghNewer) {
       fs.writeFileSync(paths.items, JSON.stringify(gh, null, 2));
       console.log(`[backup] items.json: GitHub copy is newer (max createdAt ${gNewest} > ${lNewest}) — using it`);
+      return true;
     }
-  } catch (e) { console.error('[backup] items.json freshness check failed', e.message); }
+    return false;
+  } catch (e) { console.error('[backup] items.json freshness check failed', e.message); return false; }
 }
 
 async function megaRestoreUploads() {
@@ -2233,9 +2235,9 @@ async function backupRestoreUploads() {
   /* v3.34.0: run on EVERY boot (also when local data survived) — if the process
      died before the items.json backup push landed in MEGA, GitHub's newer copy
      must win over the restored/persisted stale one. */
-  await preferNewerItemsJson();
+  const itemsFreshened = await preferNewerItemsJson();
 
-  if (restoredCount > 0) {
+  if (restoredCount > 0 || itemsFreshened) {
     reloadRuntimeState();
     if (itemsEmpty) {
       // restore uploaded files in the background: MEGA first, GitHub after
